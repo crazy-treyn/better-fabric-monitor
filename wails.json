@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "better-fabric-monitor",
+  "outputfilename": "better-fabric-monitor",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Trey",
+    "email": "11891017+crazy-treyn@users.noreply.github.com"
+  }
+}
