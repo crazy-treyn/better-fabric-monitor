@@ -56,7 +56,7 @@ type PipelineRun struct {
 
 // SyncMetadata tracks sync operations
 type SyncMetadata struct {
-	ID            int       `json:"id"`
+	ID            int64     `json:"id"`
 	LastSyncTime  time.Time `json:"lastSyncTime"`
 	SyncType      string    `json:"syncType"`
 	RecordsSynced int       `json:"recordsSynced"`

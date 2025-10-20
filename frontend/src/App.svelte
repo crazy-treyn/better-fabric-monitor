@@ -1,13 +1,17 @@
 <script>
   import { onMount } from "svelte";
-  import { authStore } from "./stores/auth.js";
+  import { authStore, authActions } from "./stores/auth.js";
   import LoginView from "./components/LoginView.svelte";
   import Dashboard from "./components/Dashboard.svelte";
 
   let currentView = "login";
+  let isCheckingAuth = true;
 
-  onMount(() => {
-    // Check if user is already authenticated
+  onMount(async () => {
+    // Check if user is already authenticated from cache
+    await authActions.checkAuth();
+    isCheckingAuth = false;
+
     if ($authStore.isAuthenticated) {
       currentView = "dashboard";
     }
@@ -16,7 +20,7 @@
   // Listen for auth state changes
   $: if ($authStore.isAuthenticated) {
     currentView = "dashboard";
-  } else {
+  } else if (!isCheckingAuth) {
     currentView = "login";
   }
 </script>

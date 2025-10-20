@@ -10,6 +10,14 @@ export function GetJobs() {
   return window['go']['main']['App']['GetJobs']();
 }
 
+export function GetJobsFromCache() {
+  return window['go']['main']['App']['GetJobsFromCache']();
+}
+
+export function GetLastSyncTime() {
+  return window['go']['main']['App']['GetLastSyncTime']();
+}
+
 export function GetUserInfo() {
   return window['go']['main']['App']['GetUserInfo']();
 }

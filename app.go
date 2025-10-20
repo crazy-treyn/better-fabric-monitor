@@ -67,6 +67,15 @@ func (a *App) startup(ctx context.Context) {
 		fmt.Printf("Failed to initialize auth: %v\n", err)
 	} else {
 		a.auth = authManager
+
+		// Try to restore existing session from cache
+		if token, err := a.auth.GetToken(ctx); err == nil {
+			fmt.Println("Restored authentication from cache")
+			a.currentToken = token
+			a.fabricClient = fabric.NewClient(token.AccessToken)
+		} else {
+			fmt.Printf("No cached authentication found: %v\n", err)
+		}
 	}
 }
 
@@ -215,6 +224,24 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 		}
 	}
 
+	// Persist workspaces to DuckDB
+	if a.db != nil {
+		for _, ws := range workspaces {
+			dbWorkspace := &db.Workspace{
+				ID:          ws.ID,
+				DisplayName: ws.DisplayName,
+				Type:        ws.Type,
+			}
+			if ws.Description != "" {
+				dbWorkspace.Description = &ws.Description
+			}
+			if err := a.db.SaveWorkspace(dbWorkspace); err != nil {
+				fmt.Printf("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
+			}
+		}
+		fmt.Printf("Persisted %d workspaces to database\n", len(workspaces))
+	}
+
 	// Convert to map format for frontend
 	result := make([]map[string]interface{}, 0, len(workspaces))
 	for _, ws := range workspaces {
@@ -276,8 +303,21 @@ func (a *App) GetJobs() []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 
-	// Get recent jobs across all workspaces
-	jobs, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 50)
+	// Check for last sync time to enable incremental loading
+	var startTimeFrom *time.Time
+	if a.db != nil {
+		lastSync, err := a.db.GetLastSyncTime("job_instances")
+		if err == nil && lastSync != nil {
+			startTimeFrom = lastSync
+			fmt.Printf("Last sync was at %s, doing incremental load\n", lastSync.Format(time.RFC3339))
+		} else {
+			fmt.Println("No previous sync found, doing full load")
+		}
+	}
+
+	// Get recent jobs across all workspaces (no limit - return all)
+	// Pass startTimeFrom for incremental sync (will also fetch all in-progress jobs)
+	jobs, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom)
 	if err != nil {
 		fmt.Printf("Failed to get jobs: %v\n", err)
 		return []map[string]interface{}{
@@ -289,7 +329,170 @@ func (a *App) GetJobs() []map[string]interface{} {
 		}
 	}
 
+	// Persist jobs to DuckDB
+	if a.db != nil && len(jobs) > 0 {
+		// First, persist all unique items that these jobs reference (to satisfy foreign key constraints)
+		itemsMap := make(map[string]db.Item)
+		for _, job := range jobs {
+			itemID := job["itemId"].(string)
+			if _, exists := itemsMap[itemID]; !exists {
+				item := db.Item{
+					ID:          itemID,
+					WorkspaceID: job["workspaceId"].(string),
+					DisplayName: job["itemDisplayName"].(string),
+					Type:        job["itemType"].(string),
+				}
+				itemsMap[itemID] = item
+			}
+		}
+
+		// Save all items
+		for _, item := range itemsMap {
+			if err := a.db.SaveItem(&item); err != nil {
+				fmt.Printf("Warning: failed to save item %s to database: %v\n", item.ID, err)
+			}
+		}
+		fmt.Printf("Persisted %d unique items to database\n", len(itemsMap))
+
+		// Now persist job instances
+		dbJobs := make([]db.JobInstance, 0, len(jobs))
+		for _, job := range jobs {
+			// Parse start time
+			startTime, err := time.Parse(time.RFC3339, job["startTime"].(string))
+			if err != nil {
+				fmt.Printf("Warning: failed to parse start time: %v\n", err)
+				continue
+			}
+
+			dbJob := db.JobInstance{
+				ID:          job["id"].(string),
+				WorkspaceID: job["workspaceId"].(string),
+				ItemID:      job["itemId"].(string),
+				JobType:     job["jobType"].(string),
+				Status:      job["status"].(string),
+				StartTime:   startTime,
+			}
+
+			// Parse end time if present
+			if endTimeStr, ok := job["endTime"].(string); ok && endTimeStr != "" {
+				if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+					dbJob.EndTime = &endTime
+				}
+			}
+
+			// Duration
+			if durationMs, ok := job["durationMs"].(int64); ok {
+				dbJob.DurationMs = &durationMs
+			}
+
+			// Failure reason
+			if failureReason, ok := job["failureReason"].(string); ok && failureReason != "" {
+				dbJob.FailureReason = &failureReason
+			}
+
+			dbJobs = append(dbJobs, dbJob)
+		}
+
+		if len(dbJobs) > 0 {
+			if err := a.db.SaveJobInstances(dbJobs); err != nil {
+				fmt.Printf("Warning: failed to save jobs to database: %v\n", err)
+			} else {
+				if startTimeFrom != nil {
+					fmt.Printf("Persisted %d new/updated job instances to database (incremental)\n", len(dbJobs))
+				} else {
+					fmt.Printf("Persisted %d job instances to database (full sync)\n", len(dbJobs))
+				}
+				// Record sync metadata
+				if err := a.db.UpdateSyncMetadata("job_instances", len(dbJobs), 0); err != nil {
+					fmt.Printf("Warning: failed to update sync metadata: %v\n", err)
+				}
+			}
+		}
+	}
+
+	// If doing incremental sync, merge with cached data to get complete view
+	if startTimeFrom != nil && a.db != nil {
+		fmt.Println("Merging fresh jobs with cached historical data...")
+		cachedJobs := a.GetJobsFromCache()
+
+		// Create a map of fresh job IDs for deduplication
+		freshJobIDs := make(map[string]bool)
+		for _, job := range jobs {
+			if id, ok := job["id"].(string); ok {
+				freshJobIDs[id] = true
+			}
+		}
+
+		// Add cached jobs that aren't in the fresh results
+		for _, cachedJob := range cachedJobs {
+			if id, ok := cachedJob["id"].(string); ok {
+				if !freshJobIDs[id] {
+					jobs = append(jobs, cachedJob)
+				}
+			}
+		}
+
+		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d)\n", len(jobs), len(freshJobIDs), len(cachedJobs))
+	}
+
 	return jobs
+}
+
+// GetJobsFromCache retrieves jobs from the local DuckDB cache
+func (a *App) GetJobsFromCache() []map[string]interface{} {
+	if a.db == nil {
+		return []map[string]interface{}{}
+	}
+
+	// Get all jobs from database
+	filter := db.JobFilter{}
+	jobs, err := a.db.GetJobInstances(filter)
+	if err != nil {
+		fmt.Printf("Failed to get jobs from cache: %v\n", err)
+		return []map[string]interface{}{}
+	}
+
+	// Convert to map format for frontend
+	result := make([]map[string]interface{}, 0, len(jobs))
+	for _, job := range jobs {
+		jobMap := map[string]interface{}{
+			"id":          job.ID,
+			"workspaceId": job.WorkspaceID,
+			"itemId":      job.ItemID,
+			"jobType":     job.JobType,
+			"status":      job.Status,
+			"startTime":   job.StartTime.Format(time.RFC3339),
+		}
+
+		if job.EndTime != nil {
+			jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
+		}
+		if job.DurationMs != nil {
+			jobMap["durationMs"] = *job.DurationMs
+		}
+		if job.FailureReason != nil {
+			jobMap["failureReason"] = *job.FailureReason
+		}
+
+		result = append(result, jobMap)
+	}
+
+	fmt.Printf("Loaded %d jobs from cache\n", len(result))
+	return result
+}
+
+// GetLastSyncTime returns the last time data was synced from the API
+func (a *App) GetLastSyncTime() string {
+	if a.db == nil {
+		return ""
+	}
+
+	lastSync, err := a.db.GetLastSyncTime("job_instances")
+	if err != nil || lastSync == nil {
+		return ""
+	}
+
+	return lastSync.Format(time.RFC3339)
 }
 
 // Greet returns a greeting for the given name (legacy method)

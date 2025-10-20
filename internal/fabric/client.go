@@ -6,8 +6,55 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
+
+// FabricTime is a custom time type that can parse Microsoft Fabric's timestamp format
+type FabricTime struct {
+	time.Time
+}
+
+// UnmarshalJSON handles the custom timestamp format from Microsoft Fabric API
+func (ft *FabricTime) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), "\"")
+	if s == "null" || s == "" {
+		ft.Time = time.Time{}
+		return nil
+	}
+
+	// Microsoft Fabric returns timestamps like "2025-10-20T18:48:52.0917149" without timezone
+	// We need to handle this format and assume UTC
+	layouts := []string{
+		time.RFC3339,                  // Standard format with timezone
+		time.RFC3339Nano,              // Standard format with nanoseconds
+		"2006-01-02T15:04:05.9999999", // Microsoft format without timezone
+		"2006-01-02T15:04:05",         // Without fractional seconds
+	}
+
+	var err error
+	for _, layout := range layouts {
+		ft.Time, err = time.Parse(layout, s)
+		if err == nil {
+			// If no timezone was specified, assume UTC
+			if ft.Time.Location() == time.UTC && !strings.Contains(s, "Z") && !strings.Contains(s, "+") && !strings.Contains(s, "-") {
+				// Timestamp was parsed but has no timezone info, already in UTC
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unable to parse time %q: %w", s, err)
+}
+
+// MarshalJSON converts the time back to JSON
+func (ft FabricTime) MarshalJSON() ([]byte, error) {
+	if ft.Time.IsZero() {
+		return []byte("null"), nil
+	}
+	return []byte(fmt.Sprintf("\"%s\"", ft.Time.Format(time.RFC3339))), nil
+}
 
 // Client handles Microsoft Fabric API requests
 type Client struct {
@@ -61,15 +108,43 @@ type ItemsResponse struct {
 
 // JobInstance represents a job run instance
 type JobInstance struct {
-	ID             string    `json:"id"`
-	ItemID         string    `json:"itemId"`
-	JobType        string    `json:"jobType"`
-	InvokeType     string    `json:"invokeType"`
-	Status         string    `json:"status"`
-	StartTimeUtc   time.Time `json:"startTimeUtc"`
-	EndTimeUtc     time.Time `json:"endTimeUtc,omitempty"`
-	FailureReason  string    `json:"failureReason,omitempty"`
-	RootActivityID string    `json:"rootActivityId,omitempty"`
+	ID             string          `json:"id"`
+	ItemID         string          `json:"itemId"`
+	JobType        string          `json:"jobType"`
+	InvokeType     string          `json:"invokeType"`
+	Status         string          `json:"status"`
+	StartTimeUtc   FabricTime      `json:"startTimeUtc"`
+	EndTimeUtc     FabricTime      `json:"endTimeUtc,omitempty"`
+	FailureReason  json.RawMessage `json:"failureReason,omitempty"` // Can be string or object
+	RootActivityID string          `json:"rootActivityId,omitempty"`
+}
+
+// GetFailureReasonString extracts failure reason as a string
+func (ji *JobInstance) GetFailureReasonString() string {
+	if len(ji.FailureReason) == 0 {
+		return ""
+	}
+
+	// Try to unmarshal as a string first
+	var str string
+	if err := json.Unmarshal(ji.FailureReason, &str); err == nil {
+		return str
+	}
+
+	// If it's an object, try to extract a message field
+	var obj map[string]interface{}
+	if err := json.Unmarshal(ji.FailureReason, &obj); err == nil {
+		if msg, ok := obj["message"].(string); ok {
+			return msg
+		}
+		if msg, ok := obj["errorMessage"].(string); ok {
+			return msg
+		}
+		// Return the whole object as JSON string
+		return string(ji.FailureReason)
+	}
+
+	return string(ji.FailureReason)
 }
 
 // JobInstancesResponse represents the API response for job instances
@@ -199,12 +274,28 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 	return allInstances, nil
 }
 
-// GetRecentJobs retrieves recent job instances across all workspaces
-func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limit int) ([]map[string]interface{}, error) {
+// GetRecentJobs retrieves recent job instances across all workspaces in Fabric
+// If startTimeFrom is provided, only fetches jobs with start_time > startTimeFrom
+// Always fetches jobs with end_time IS NULL (in progress) regardless of start time
+func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limit int, startTimeFrom *time.Time) ([]map[string]interface{}, error) {
 	var allJobs []map[string]interface{}
 	itemCache := make(map[string]Item) // Cache item details
 
-	fmt.Printf("Fetching jobs from %d workspaces...\n", len(workspaces))
+	// Item types that support job instances based on Microsoft Fabric documentation
+	// https://learn.microsoft.com/en-us/rest/api/fabric/core/job-scheduler/list-item-job-instances
+	supportedTypes := map[string]bool{
+		"DataPipeline":       true,
+		"Notebook":           true,
+		"SparkJobDefinition": true,
+		"Dataflow":           true,
+		"ApacheAirflowJob":   true,
+	}
+
+	if startTimeFrom != nil {
+		fmt.Printf("Fetching jobs from %d workspaces (incremental sync from %s)...\n", len(workspaces), startTimeFrom.Format(time.RFC3339))
+	} else {
+		fmt.Printf("Fetching jobs from %d workspaces (full sync)...\n", len(workspaces))
+	}
 
 	for _, workspace := range workspaces {
 		fmt.Printf("Checking workspace: %s (%s)\n", workspace.DisplayName, workspace.ID)
@@ -216,53 +307,88 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 			continue
 		}
 
-		fmt.Printf("Found %d items in workspace %s\n", len(items), workspace.DisplayName)
+		// Filter to only items that support job instances
+		var supportedItems []Item
+		for _, item := range items {
+			if supportedTypes[item.Type] {
+				supportedItems = append(supportedItems, item)
+			}
+		}
+
+		fmt.Printf("Found %d total items, %d with job support in workspace %s\n",
+			len(items), len(supportedItems), workspace.DisplayName)
 
 		// Cache items
-		for _, item := range items {
+		for _, item := range supportedItems {
 			itemCache[item.ID] = item
 			fmt.Printf("  - %s (%s)\n", item.DisplayName, item.Type)
 		}
 
-		// Get job instances for each item
-		for _, item := range items {
-			// Check for items that might have jobs
-			// Common types: DataPipeline, Notebook, Dataflow
-			if item.Type != "DataPipeline" && item.Type != "Notebook" && item.Type != "Dataflow" {
-				continue
-			}
-
+		// Get job instances for each supported item
+		for _, item := range supportedItems {
 			fmt.Printf("Getting job instances for %s (%s)...\n", item.DisplayName, item.Type)
 
 			instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID)
 			if err != nil {
-				fmt.Printf("Warning: failed to get job instances for item %s: %v\n", item.ID, err)
+				fmt.Printf("Warning: failed to get job instances for %s: %v\n", item.DisplayName, err)
 				continue
 			}
 
-			fmt.Printf("Found %d job instances for %s\n", len(instances), item.DisplayName)
+			// Filter jobs based on incremental sync criteria
+			var filteredInstances []JobInstance
+			for _, instance := range instances {
+				// Always include jobs with no end time (in progress)
+				if instance.EndTimeUtc.Time.IsZero() {
+					filteredInstances = append(filteredInstances, instance)
+					continue
+				}
+
+				// If doing incremental sync, only include jobs newer than last sync
+				if startTimeFrom != nil {
+					if instance.StartTimeUtc.Time.After(*startTimeFrom) {
+						filteredInstances = append(filteredInstances, instance)
+					}
+				} else {
+					// Full sync - include all jobs
+					filteredInstances = append(filteredInstances, instance)
+				}
+			}
+
+			if len(filteredInstances) > 0 {
+				fmt.Printf("Found %d job instances for %s", len(filteredInstances), item.DisplayName)
+				if startTimeFrom != nil {
+					fmt.Printf(" (%d total, %d new/in-progress)\n", len(instances), len(filteredInstances))
+				} else {
+					fmt.Println()
+				}
+			}
+
+			// Add a small delay to avoid rate limiting (100ms between requests)
+			time.Sleep(100 * time.Millisecond)
 
 			// Convert to map format for frontend
-			for _, instance := range instances {
+			for _, instance := range filteredInstances {
 				job := map[string]interface{}{
 					"id":              instance.ID,
 					"workspaceId":     workspace.ID,
 					"workspaceName":   workspace.DisplayName,
 					"itemId":          item.ID,
 					"itemDisplayName": item.DisplayName,
+					"itemType":        item.Type,
 					"jobType":         instance.JobType,
 					"status":          instance.Status,
-					"startTime":       instance.StartTimeUtc.Format(time.RFC3339),
+					"startTime":       instance.StartTimeUtc.Time.Format(time.RFC3339),
 				}
 
-				if !instance.EndTimeUtc.IsZero() {
-					job["endTime"] = instance.EndTimeUtc.Format(time.RFC3339)
-					duration := instance.EndTimeUtc.Sub(instance.StartTimeUtc)
+				if !instance.EndTimeUtc.Time.IsZero() {
+					job["endTime"] = instance.EndTimeUtc.Time.Format(time.RFC3339)
+					duration := instance.EndTimeUtc.Time.Sub(instance.StartTimeUtc.Time)
 					job["durationMs"] = int64(duration / time.Millisecond)
 				}
 
-				if instance.FailureReason != "" {
-					job["failureReason"] = instance.FailureReason
+				failureReason := instance.GetFailureReasonString()
+				if failureReason != "" {
+					job["failureReason"] = failureReason
 				}
 
 				allJobs = append(allJobs, job)
@@ -272,10 +398,15 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 
 	fmt.Printf("Total jobs found: %d\n", len(allJobs))
 
-	// Sort by start time (most recent first) and limit
-	// Note: This is a simple implementation. For better performance with large datasets,
-	// consider implementing pagination at the API level
-	if len(allJobs) > limit {
+	// Sort by start time (most recent first)
+	sort.Slice(allJobs, func(i, j int) bool {
+		timeI, _ := time.Parse(time.RFC3339, allJobs[i]["startTime"].(string))
+		timeJ, _ := time.Parse(time.RFC3339, allJobs[j]["startTime"].(string))
+		return timeI.After(timeJ) // Most recent first
+	})
+
+	// Limit results (0 means no limit)
+	if limit > 0 && len(allJobs) > limit {
 		allJobs = allJobs[:limit]
 	}
 

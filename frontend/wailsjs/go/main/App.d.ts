@@ -5,6 +5,10 @@ export function CompleteLogin():Promise<Record<string, any>>;
 
 export function GetJobs():Promise<Array<Record<string, any>>>;
 
+export function GetJobsFromCache():Promise<Array<Record<string, any>>>;
+
+export function GetLastSyncTime():Promise<string>;
+
 export function GetUserInfo():Promise<Record<string, any>>;
 
 export function GetWorkspaces():Promise<Array<Record<string, any>>>;

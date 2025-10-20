@@ -11,12 +11,12 @@ import (
 func (db *Database) SaveWorkspace(workspace *Workspace) error {
 	query := `
 		INSERT INTO workspaces (id, display_name, type, description, updated_at)
-		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		VALUES (?, ?, ?, ?, now())
 		ON CONFLICT(id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			type = EXCLUDED.type,
 			description = EXCLUDED.description,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = now()
 	`
 	_, err := db.conn.Exec(query, workspace.ID, workspace.DisplayName, workspace.Type, workspace.Description)
 	return err
@@ -51,12 +51,12 @@ func (db *Database) GetWorkspaces() ([]Workspace, error) {
 func (db *Database) SaveItem(item *Item) error {
 	query := `
 		INSERT INTO items (id, workspace_id, display_name, type, description, updated_at)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		VALUES (?, ?, ?, ?, ?, now())
 		ON CONFLICT(id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			type = EXCLUDED.type,
 			description = EXCLUDED.description,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = now()
 	`
 	_, err := db.conn.Exec(query, item.ID, item.WorkspaceID, item.DisplayName, item.Type, item.Description)
 	return err
@@ -104,13 +104,13 @@ func (db *Database) SaveJobInstances(jobs []JobInstance) error {
 		INSERT INTO job_instances (
 			id, workspace_id, item_id, job_type, status, start_time,
 			end_time, duration_ms, failure_reason, invoker_type, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
 		ON CONFLICT(id) DO UPDATE SET
 			status = EXCLUDED.status,
 			end_time = EXCLUDED.end_time,
 			duration_ms = EXCLUDED.duration_ms,
 			failure_reason = EXCLUDED.failure_reason,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = now()
 	`
 
 	stmt, err := tx.Prepare(query)
@@ -244,7 +244,7 @@ func (db *Database) GetJobStats(workspaceID string, from, to time.Time) (*JobSta
 func (db *Database) UpdateSyncMetadata(syncType string, recordsSynced, errors int) error {
 	query := `
 		INSERT INTO sync_metadata (last_sync_time, sync_type, records_synced, errors)
-		VALUES (CURRENT_TIMESTAMP, ?, ?, ?)
+		VALUES (now(), ?, ?, ?)
 	`
 	_, err := db.conn.Exec(query, syncType, recordsSynced, errors)
 	return err
@@ -269,4 +269,60 @@ func (db *Database) GetLastSyncTime(syncType string) (*time.Time, error) {
 		return nil, err
 	}
 	return &lastSync, nil
+}
+
+// GetInProgressJobIDs returns IDs of jobs that don't have an end time (still in progress)
+func (db *Database) GetInProgressJobIDs() ([]string, error) {
+	query := `
+		SELECT id
+		FROM job_instances
+		WHERE end_time IS NULL
+	`
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// GetInProgressJobsByWorkspaceAndItem returns job instances that are in progress for a specific workspace/item
+func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID string) ([]JobInstance, error) {
+	query := `
+		SELECT id, workspace_id, item_id, job_type, status, start_time,
+			   end_time, duration_ms, failure_reason, invoker_type, created_at, updated_at
+		FROM job_instances
+		WHERE workspace_id = ? AND item_id = ? AND end_time IS NULL
+		ORDER BY start_time DESC
+	`
+
+	rows, err := db.conn.Query(query, workspaceID, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []JobInstance
+	for rows.Next() {
+		var job JobInstance
+		err := rows.Scan(
+			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
+			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.CreatedAt, &job.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
 }
