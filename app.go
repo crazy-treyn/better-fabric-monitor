@@ -759,6 +759,105 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	return result
 }
 
+// GetAnalyticsFiltered returns comprehensive analytics data with optional filters
+func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7 // Default to 7 days
+	}
+
+	result := make(map[string]interface{})
+
+	// Get daily stats
+	dailyStats, err := a.db.GetDailyStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get daily stats: %v\n", err)
+		result["dailyStatsError"] = err.Error()
+	} else {
+		result["dailyStats"] = dailyStats
+	}
+
+	// Get workspace stats
+	workspaceStats, err := a.db.GetWorkspaceStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get workspace stats: %v\n", err)
+		result["workspaceStatsError"] = err.Error()
+	} else {
+		result["workspaceStats"] = workspaceStats
+	}
+
+	// Get item type stats
+	itemTypeStats, err := a.db.GetItemTypeStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get item type stats: %v\n", err)
+		result["itemTypeStatsError"] = err.Error()
+	} else {
+		result["itemTypeStats"] = itemTypeStats
+	}
+
+	// Get recent failures (last 10 within the time period)
+	recentFailures, err := a.db.GetRecentFailuresFiltered(10, days, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get recent failures: %v\n", err)
+		result["recentFailuresError"] = err.Error()
+	} else {
+		result["recentFailures"] = recentFailures
+	}
+
+	// Get long-running jobs (50% or more above average, last 10)
+	longRunningJobs, err := a.db.GetLongRunningJobsFiltered(days, 50.0, 10, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get long-running jobs: %v\n", err)
+		result["longRunningJobsError"] = err.Error()
+	} else {
+		result["longRunningJobs"] = longRunningJobs
+	}
+
+	// Get overall stats - calculated entirely in DuckDB for consistency
+	overallStats, err := a.db.GetOverallStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		fmt.Printf("Failed to get overall stats: %v\n", err)
+		result["overallStatsError"] = err.Error()
+	} else {
+		result["overallStats"] = map[string]interface{}{
+			"totalJobs":     overallStats.TotalJobs,
+			"successful":    overallStats.Successful,
+			"failed":        overallStats.Failed,
+			"running":       overallStats.Running,
+			"successRate":   overallStats.SuccessRate,
+			"avgDurationMs": overallStats.AvgDurationMs,
+		}
+	}
+
+	result["days"] = days
+
+	return result
+}
+
+// GetAvailableItemTypes returns distinct item types that have job data
+func (a *App) GetAvailableItemTypes(days int, workspaceIDs []string) []string {
+	if a.db == nil {
+		return []string{}
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+
+	itemTypes, err := a.db.GetAvailableItemTypes(days, workspaceIDs)
+	if err != nil {
+		fmt.Printf("Failed to get available item types: %v\n", err)
+		return []string{}
+	}
+
+	return itemTypes
+}
+
 // GetItemStatsByWorkspace returns item-level statistics for a specific workspace
 func (a *App) GetItemStatsByWorkspace(workspaceID string, days int) map[string]interface{} {
 	if a.db == nil {

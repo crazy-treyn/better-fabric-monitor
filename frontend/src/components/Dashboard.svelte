@@ -1,6 +1,7 @@
 <script>
     import { onMount } from "svelte";
     import { authStore, authActions } from "../stores/auth.js";
+    import { filterStore } from "../stores/filters.js";
     import Analytics from "./Analytics.svelte";
 
     let workspaces = [];
@@ -14,9 +15,15 @@
     let filterJob = "";
     let filterType = "";
     let filterStatus = "";
-    let selectedWorkspaceId = null;
+    let workspaceSearchText = "";
     let hasLoadedData = false;
     let lastSyncTime = "";
+
+    // Subscribe to filter store for workspace selection
+    let selectedWorkspaceIds = new Set();
+    filterStore.subscribe((state) => {
+        selectedWorkspaceIds = state.selectedWorkspaceIds;
+    });
 
     onMount(async () => {
         // Load cached data from DuckDB on mount
@@ -135,9 +142,23 @@
     }
 
     // Handle workspace selection
-    function selectWorkspace(workspaceId) {
-        selectedWorkspaceId =
-            selectedWorkspaceId === workspaceId ? null : workspaceId;
+    function toggleWorkspaceSelection(workspaceId, event) {
+        // Support Ctrl/Shift+Click for quick multi-select
+        if (event?.ctrlKey || event?.shiftKey) {
+            filterStore.toggleWorkspace(workspaceId);
+        } else {
+            filterStore.toggleWorkspace(workspaceId);
+        }
+    }
+
+    // Select all visible workspaces (based on search)
+    function selectAllWorkspaces() {
+        filterStore.selectAllWorkspaces(filteredWorkspaces);
+    }
+
+    // Clear all workspace selections
+    function clearAllWorkspaces() {
+        filterStore.clearWorkspaces();
     }
 
     // Computed filtered jobs
@@ -150,9 +171,17 @@
         const matchesType = !filterType || job.itemType === filterType;
         const matchesStatus = !filterStatus || job.status === filterStatus;
         const matchesWorkspace =
-            !selectedWorkspaceId || job.workspaceId === selectedWorkspaceId;
+            selectedWorkspaceIds.size === 0 ||
+            selectedWorkspaceIds.has(job.workspaceId);
         return matchesJob && matchesType && matchesStatus && matchesWorkspace;
     });
+
+    // Computed filtered workspaces based on search text
+    $: filteredWorkspaces = workspaces.filter((ws) =>
+        (ws.displayName || ws.id)
+            .toLowerCase()
+            .includes(workspaceSearchText.toLowerCase()),
+    );
 
     // Get unique values for filters
     $: uniqueTypes = [
@@ -273,39 +302,93 @@
                     class="bg-slate-800 border-r border-slate-700 p-4 flex flex-col overflow-hidden"
                     style="width: {sidebarWidth}px; min-width: 200px; max-width: 500px;"
                 >
-                    <h2 class="text-lg font-semibold text-white mb-4">
-                        Workspaces
-                    </h2>
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <h2 class="text-lg font-semibold text-white">
+                                Workspaces
+                                {#if selectedWorkspaceIds.size > 0}
+                                    <span
+                                        class="ml-2 text-sm font-normal text-primary-400"
+                                    >
+                                        ({selectedWorkspaceIds.size} selected)
+                                    </span>
+                                {/if}
+                            </h2>
+                        </div>
+
+                        <!-- Search box -->
+                        <input
+                            type="text"
+                            bind:value={workspaceSearchText}
+                            placeholder="Search workspaces..."
+                            class="w-full px-3 py-2 mb-2 bg-slate-700 border border-slate-600 rounded-md text-white text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+
+                        <!-- Selection controls -->
+                        <div class="flex gap-2">
+                            <button
+                                on:click={selectAllWorkspaces}
+                                class="flex-1 px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+                            >
+                                Select All
+                            </button>
+                            <button
+                                on:click={clearAllWorkspaces}
+                                class="flex-1 px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded transition-colors"
+                            >
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+
                     <div
                         class="space-y-2 overflow-y-auto flex-1 overflow-x-hidden"
                     >
-                        {#each workspaces as workspace}
+                        {#each filteredWorkspaces as workspace}
                             <div
-                                class="p-3 bg-slate-700 rounded-lg cursor-pointer hover:bg-slate-600 transition-colors {selectedWorkspaceId ===
-                                workspace.id
+                                class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors {selectedWorkspaceIds.has(
+                                    workspace.id,
+                                )
                                     ? 'ring-2 ring-primary-500 bg-slate-600'
                                     : ''}"
                                 title={workspace.displayName || workspace.id}
-                                on:click={() => selectWorkspace(workspace.id)}
-                                on:keydown={(e) =>
-                                    e.key === "Enter" &&
-                                    selectWorkspace(workspace.id)}
-                                role="button"
-                                tabindex="0"
                             >
-                                <h3
-                                    class="text-sm font-medium text-white truncate"
+                                <label
+                                    class="flex items-start gap-2 cursor-pointer"
                                 >
-                                    {workspace.displayName || workspace.id}
-                                </h3>
-                                <p class="text-xs text-slate-400 truncate">
-                                    {workspace.type}
-                                </p>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedWorkspaceIds.has(
+                                            workspace.id,
+                                        )}
+                                        on:change={(e) =>
+                                            toggleWorkspaceSelection(
+                                                workspace.id,
+                                                e,
+                                            )}
+                                        class="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-0"
+                                    />
+                                    <div class="flex-1 min-w-0">
+                                        <h3
+                                            class="text-sm font-medium text-white truncate"
+                                        >
+                                            {workspace.displayName ||
+                                                workspace.id}
+                                        </h3>
+                                        <p
+                                            class="text-xs text-slate-400 truncate"
+                                        >
+                                            {workspace.type}
+                                        </p>
+                                    </div>
+                                </label>
                             </div>
                         {/each}
-                        {#if workspaces.length === 0}
+                        {#if filteredWorkspaces.length === 0}
                             <p class="text-slate-400 text-sm">
-                                No workspaces found
+                                {workspaces.length === 0
+                                    ? "No workspaces found"
+                                    : "No matching workspaces"}
                             </p>
                         {/if}
                     </div>

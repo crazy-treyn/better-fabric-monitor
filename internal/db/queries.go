@@ -775,3 +775,421 @@ func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID stri
 	}
 	return jobs, rows.Err()
 }
+
+// buildFilterConditions builds WHERE clause conditions for analytics queries
+func buildFilterConditions(workspaceIDs []string, itemTypes []string, itemNameSearch string) (string, []interface{}) {
+	var conditions []string
+	var args []interface{}
+
+	// Workspace filter
+	if len(workspaceIDs) > 0 {
+		placeholders := make([]string, len(workspaceIDs))
+		for i, id := range workspaceIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		conditions = append(conditions, fmt.Sprintf("j.workspace_id IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Item type filter
+	if len(itemTypes) > 0 {
+		placeholders := make([]string, len(itemTypes))
+		for i, t := range itemTypes {
+			placeholders[i] = "?"
+			args = append(args, t)
+		}
+		conditions = append(conditions, fmt.Sprintf("i.type IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Item name search (case-insensitive partial match)
+	if itemNameSearch != "" {
+		conditions = append(conditions, "LOWER(i.display_name) LIKE LOWER(?)")
+		args = append(args, "%"+itemNameSearch+"%")
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " AND " + strings.Join(conditions, " AND ")
+	}
+
+	return whereClause, args
+}
+
+// GetAvailableItemTypes returns distinct item types that have job data in the specified time period
+func (db *Database) GetAvailableItemTypes(days int, workspaceIDs []string) ([]string, error) {
+	baseQuery := `
+		SELECT DISTINCT i.type
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+			AND i.type IS NOT NULL
+	`
+
+	var conditions []string
+	var args []interface{}
+	args = append(args, fmt.Sprintf("%d", days))
+
+	// Workspace filter
+	if len(workspaceIDs) > 0 {
+		placeholders := make([]string, len(workspaceIDs))
+		for i, id := range workspaceIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		conditions = append(conditions, fmt.Sprintf("j.workspace_id IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	if len(conditions) > 0 {
+		baseQuery += " AND " + strings.Join(conditions, " AND ")
+	}
+
+	baseQuery += " ORDER BY i.type"
+
+	rows, err := db.conn.Query(baseQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var types []string
+	for rows.Next() {
+		var itemType string
+		if err := rows.Scan(&itemType); err != nil {
+			return nil, err
+		}
+		types = append(types, itemType)
+	}
+	return types, rows.Err()
+}
+
+// GetOverallStatsFiltered returns aggregated statistics with optional filters
+func (db *Database) GetOverallStatsFiltered(days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) (*JobStats, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.status = 'Completed' AND j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		%s
+	`, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+
+	var stats JobStats
+	var avgDuration sql.NullFloat64
+
+	err := db.conn.QueryRow(query, args...).Scan(
+		&stats.TotalJobs, &stats.Successful, &stats.Failed, &stats.Running, &avgDuration,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return &JobStats{}, nil
+		}
+		return nil, err
+	}
+
+	if avgDuration.Valid {
+		stats.AvgDurationMs = avgDuration.Float64
+	}
+
+	if stats.TotalJobs > 0 {
+		stats.SuccessRate = float64(stats.Successful) / float64(stats.TotalJobs) * 100
+	}
+
+	return &stats, nil
+}
+
+// GetDailyStatsFiltered returns daily statistics with optional filters
+func (db *Database) GetDailyStatsFiltered(days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]DailyStats, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			DATE_TRUNC('day', j.start_time)::DATE as date,
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		%s
+		GROUP BY DATE_TRUNC('day', j.start_time)::DATE
+		ORDER BY date ASC
+	`, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []DailyStats
+	for rows.Next() {
+		var s DailyStats
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.Date, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetWorkspaceStatsFiltered returns workspace statistics with optional filters
+func (db *Database) GetWorkspaceStatsFiltered(days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]WorkspaceStats, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			j.workspace_id,
+			w.display_name as workspace_name,
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		%s
+		GROUP BY j.workspace_id, w.display_name
+		ORDER BY total_jobs DESC
+	`, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []WorkspaceStats
+	for rows.Next() {
+		var s WorkspaceStats
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.WorkspaceID, &s.WorkspaceName, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetItemTypeStatsFiltered returns item type statistics with optional filters
+func (db *Database) GetItemTypeStatsFiltered(days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]ItemTypeStats, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			i.type as item_type,
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		%s
+		GROUP BY i.type
+		ORDER BY total_jobs DESC
+	`, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []ItemTypeStats
+	for rows.Next() {
+		var s ItemTypeStats
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.ItemType, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetRecentFailuresFiltered returns recent failures with optional filters
+func (db *Database) GetRecentFailuresFiltered(limit int, days int, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]RecentFailure, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			j.id, j.workspace_id, w.display_name as workspace_name,
+			j.item_id, i.display_name as item_display_name, i.type as item_type,
+			j.job_type, j.start_time, j.end_time, j.duration_ms, j.failure_reason
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		WHERE j.status = 'Failed' 
+			AND j.end_time IS NOT NULL
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		%s
+		ORDER BY j.start_time DESC
+		LIMIT ?
+	`, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+	args = append(args, limit)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var failures []RecentFailure
+	for rows.Next() {
+		var f RecentFailure
+		var endTime sql.NullTime
+		var durationMs sql.NullInt64
+		var failureReason sql.NullString
+
+		err := rows.Scan(
+			&f.ID, &f.WorkspaceID, &f.WorkspaceName,
+			&f.ItemID, &f.ItemDisplayName, &f.ItemType,
+			&f.JobType, &f.StartTime, &endTime, &durationMs, &failureReason,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if endTime.Valid {
+			f.EndTime = endTime.Time
+		}
+		if durationMs.Valid {
+			f.DurationMs = durationMs.Int64
+		}
+		if failureReason.Valid {
+			f.FailureReason = failureReason.String
+		}
+
+		failures = append(failures, f)
+	}
+	return failures, rows.Err()
+}
+
+// GetLongRunningJobsFiltered returns long-running jobs with optional filters
+func (db *Database) GetLongRunningJobsFiltered(days int, minDeviationPct float64, limit int, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]LongRunningJob, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		WITH item_averages AS (
+			SELECT
+				j.item_id,
+				AVG(j.duration_ms) as avg_duration_ms
+			FROM job_instances j
+			LEFT JOIN items i ON j.item_id = i.id
+			WHERE j.status = 'Completed'
+				AND j.duration_ms IS NOT NULL
+				AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+			%s
+			GROUP BY j.item_id
+			HAVING COUNT(*) >= 3
+		)
+		SELECT
+			j.id, j.workspace_id, w.display_name as workspace_name,
+			j.item_id, i.display_name as item_display_name, i.type as item_type,
+			j.job_type, j.start_time, j.duration_ms,
+			a.avg_duration_ms,
+			((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) as deviation_pct
+		FROM job_instances j
+		INNER JOIN item_averages a ON j.item_id = a.item_id
+		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		WHERE j.status = 'Completed'
+			AND j.duration_ms IS NOT NULL
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+			AND ((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) > ?
+		%s
+		ORDER BY deviation_pct DESC
+		LIMIT ?
+	`, filterClause, filterClause)
+
+	args := []interface{}{fmt.Sprintf("%d", days)}
+	args = append(args, filterArgs...)
+	args = append(args, fmt.Sprintf("%d", days))
+	args = append(args, minDeviationPct)
+	args = append(args, filterArgs...)
+	args = append(args, limit)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []LongRunningJob
+	for rows.Next() {
+		var j LongRunningJob
+
+		err := rows.Scan(
+			&j.ID, &j.WorkspaceID, &j.WorkspaceName,
+			&j.ItemID, &j.ItemDisplayName, &j.ItemType,
+			&j.JobType, &j.StartTime, &j.DurationMs,
+			&j.AvgDurationMs, &j.DeviationPct,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		jobs = append(jobs, j)
+	}
+	return jobs, rows.Err()
+}
