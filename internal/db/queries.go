@@ -11,12 +11,12 @@ import (
 func (db *Database) SaveWorkspace(workspace *Workspace) error {
 	query := `
 		INSERT INTO workspaces (id, display_name, type, description, updated_at)
-		VALUES (?, ?, ?, ?, now())
+		VALUES (?, ?, ?, ?, current_timestamp)
 		ON CONFLICT(id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			type = EXCLUDED.type,
 			description = EXCLUDED.description,
-			updated_at = now()
+			updated_at = current_timestamp
 	`
 	_, err := db.conn.Exec(query, workspace.ID, workspace.DisplayName, workspace.Type, workspace.Description)
 	return err
@@ -51,12 +51,12 @@ func (db *Database) GetWorkspaces() ([]Workspace, error) {
 func (db *Database) SaveItem(item *Item) error {
 	query := `
 		INSERT INTO items (id, workspace_id, display_name, type, description, updated_at)
-		VALUES (?, ?, ?, ?, ?, now())
+		VALUES (?, ?, ?, ?, ?, current_timestamp)
 		ON CONFLICT(id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			type = EXCLUDED.type,
 			description = EXCLUDED.description,
-			updated_at = now()
+			updated_at = current_timestamp
 	`
 	_, err := db.conn.Exec(query, item.ID, item.WorkspaceID, item.DisplayName, item.Type, item.Description)
 	return err
@@ -104,13 +104,13 @@ func (db *Database) SaveJobInstances(jobs []JobInstance) error {
 		INSERT INTO job_instances (
 			id, workspace_id, item_id, job_type, status, start_time,
 			end_time, duration_ms, failure_reason, invoker_type, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
 		ON CONFLICT(id) DO UPDATE SET
 			status = EXCLUDED.status,
 			end_time = EXCLUDED.end_time,
 			duration_ms = EXCLUDED.duration_ms,
 			failure_reason = EXCLUDED.failure_reason,
-			updated_at = now()
+			updated_at = current_timestamp
 	`
 
 	stmt, err := tx.Prepare(query)
@@ -265,7 +265,7 @@ func (db *Database) GetJobStats(workspaceID string, from, to time.Time) (*JobSta
 func (db *Database) UpdateSyncMetadata(syncType string, recordsSynced, errors int) error {
 	query := `
 		INSERT INTO sync_metadata (last_sync_time, sync_type, records_synced, errors)
-		VALUES (now(), ?, ?, ?)
+		VALUES (current_timestamp, ?, ?, ?)
 	`
 	_, err := db.conn.Exec(query, syncType, recordsSynced, errors)
 	return err
