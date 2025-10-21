@@ -8,6 +8,13 @@
     let error = null;
     let chartCanvas;
     let chartInstance = null;
+    let workspaceChartCanvas;
+    let workspaceChartInstance = null;
+    let jobTypeChartCanvas;
+    let jobTypeChartInstance = null;
+    let selectedWorkspace = null;
+    let selectedJobType = null;
+    let drillDownData = null;
 
     onMount(async () => {
         await loadAnalytics();
@@ -21,6 +28,20 @@
             analytics.dailyStats.length > 0
         ) {
             updateChart();
+        }
+        if (
+            workspaceChartCanvas &&
+            analytics?.workspaceStats &&
+            analytics.workspaceStats.length > 0
+        ) {
+            updateWorkspaceChart();
+        }
+        if (
+            jobTypeChartCanvas &&
+            analytics?.itemTypeStats &&
+            analytics.itemTypeStats.length > 0
+        ) {
+            updateJobTypeChart();
         }
     });
 
@@ -117,6 +138,231 @@
                     x: {
                         ticks: {
                             color: "rgb(148, 163, 184)",
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function updateWorkspaceChart() {
+        // Destroy existing chart if it exists
+        if (workspaceChartInstance) {
+            workspaceChartInstance.destroy();
+        }
+
+        if (
+            !workspaceChartCanvas ||
+            !analytics?.workspaceStats ||
+            analytics.workspaceStats.length === 0
+        ) {
+            return;
+        }
+
+        const ctx = workspaceChartCanvas.getContext("2d");
+
+        // Sort by total jobs descending
+        const sortedStats = [...analytics.workspaceStats].sort(
+            (a, b) => b.totalJobs - a.totalJobs,
+        );
+
+        const labels = sortedStats.map(
+            (stat) => stat.workspaceName || stat.workspaceId,
+        );
+        const successCounts = sortedStats.map((stat) => stat.successful);
+        const failureCounts = sortedStats.map((stat) => stat.failed);
+        const avgDurations = sortedStats.map((stat) => stat.avgDurationMs);
+
+        workspaceChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Successful",
+                        data: successCounts,
+                        backgroundColor: "rgba(74, 222, 128, 0.8)",
+                        borderColor: "rgb(74, 222, 128)",
+                        borderWidth: 1,
+                    },
+                    {
+                        label: "Failed",
+                        data: failureCounts,
+                        backgroundColor: "rgba(248, 113, 113, 0.8)",
+                        borderColor: "rgb(248, 113, 113)",
+                        borderWidth: 1,
+                    },
+                ],
+            },
+            options: {
+                indexAxis: "y", // This makes it horizontal
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "top",
+                        labels: {
+                            color: "rgb(203, 213, 225)",
+                            font: {
+                                size: 12,
+                            },
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: "rgba(15, 23, 42, 0.9)",
+                        titleColor: "rgb(226, 232, 240)",
+                        bodyColor: "rgb(203, 213, 225)",
+                        borderColor: "rgb(71, 85, 105)",
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function (context) {
+                                const label = context.dataset.label || "";
+                                const value = context.parsed.x || 0;
+                                return `${label}: ${value}`;
+                            },
+                            afterBody: function (context) {
+                                const index = context[0].dataIndex;
+                                const avgDuration = avgDurations[index];
+                                return `\nAvg Duration: ${formatDuration(avgDuration)}`;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        beginAtZero: true,
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                            stepSize: 1,
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                    y: {
+                        stacked: true,
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function updateJobTypeChart() {
+        // Destroy existing chart if it exists
+        if (jobTypeChartInstance) {
+            jobTypeChartInstance.destroy();
+        }
+
+        if (
+            !jobTypeChartCanvas ||
+            !analytics?.itemTypeStats ||
+            analytics.itemTypeStats.length === 0
+        ) {
+            return;
+        }
+
+        const ctx = jobTypeChartCanvas.getContext("2d");
+
+        // Sort by total jobs descending
+        const sortedStats = [...analytics.itemTypeStats].sort(
+            (a, b) => b.totalJobs - a.totalJobs,
+        );
+
+        const labels = sortedStats.map((stat) => stat.itemType || "Unknown");
+        const successCounts = sortedStats.map((stat) => stat.successful);
+        const failureCounts = sortedStats.map((stat) => stat.failed);
+        const avgDurations = sortedStats.map((stat) => stat.avgDurationMs);
+
+        jobTypeChartInstance = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Successful",
+                        data: successCounts,
+                        backgroundColor: "rgba(74, 222, 128, 0.8)",
+                        borderColor: "rgb(74, 222, 128)",
+                        borderWidth: 1,
+                    },
+                    {
+                        label: "Failed",
+                        data: failureCounts,
+                        backgroundColor: "rgba(248, 113, 113, 0.8)",
+                        borderColor: "rgb(248, 113, 113)",
+                        borderWidth: 1,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "top",
+                        labels: {
+                            color: "rgb(203, 213, 225)",
+                            font: {
+                                size: 12,
+                            },
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: "rgba(15, 23, 42, 0.9)",
+                        titleColor: "rgb(226, 232, 240)",
+                        bodyColor: "rgb(203, 213, 225)",
+                        borderColor: "rgb(71, 85, 105)",
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function (context) {
+                                const label = context.dataset.label || "";
+                                const value = context.parsed.y || 0;
+                                return `${label}: ${value}`;
+                            },
+                            afterBody: function (context) {
+                                const index = context[0].dataIndex;
+                                const avgDuration = avgDurations[index];
+                                return `\nAvg Duration: ${formatDuration(avgDuration)}`;
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                            stepSize: 1,
                         },
                         grid: {
                             color: "rgba(71, 85, 105, 0.3)",
@@ -358,42 +604,8 @@
                     Workspace Performance
                 </h2>
                 {#if analytics.workspaceStats && analytics.workspaceStats.length > 0}
-                    <div class="space-y-2">
-                        {#each analytics.workspaceStats as stat}
-                            <div
-                                class="flex items-center justify-between rounded-md bg-slate-700/50 p-3"
-                            >
-                                <div class="flex-1">
-                                    <div
-                                        class="text-sm font-medium text-white truncate"
-                                        title={stat.workspaceName}
-                                    >
-                                        {stat.workspaceName || stat.workspaceId}
-                                    </div>
-                                    <div
-                                        class="mt-1 flex items-center gap-3 text-xs"
-                                    >
-                                        <span class="text-slate-300"
-                                            >{stat.totalJobs} total</span
-                                        >
-                                        <span class="text-green-400"
-                                            >{stat.successful} ✓</span
-                                        >
-                                        <span class="text-red-400"
-                                            >{stat.failed} ✗</span
-                                        >
-                                    </div>
-                                </div>
-                                <div class="text-right ml-2">
-                                    <div class="text-sm font-medium text-white">
-                                        {formatPercent(stat.successRate)}
-                                    </div>
-                                    <div class="text-xs text-slate-400">
-                                        {formatDuration(stat.avgDurationMs)}
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
+                    <div class="h-64">
+                        <canvas bind:this={workspaceChartCanvas}></canvas>
                     </div>
                 {:else}
                     <p class="text-slate-400">No workspace data available</p>
@@ -406,39 +618,8 @@
                     Job Type Breakdown
                 </h2>
                 {#if analytics.itemTypeStats && analytics.itemTypeStats.length > 0}
-                    <div class="space-y-2">
-                        {#each analytics.itemTypeStats as stat}
-                            <div
-                                class="flex items-center justify-between rounded-md bg-slate-700/50 p-3"
-                            >
-                                <div class="flex-1">
-                                    <div class="text-sm font-medium text-white">
-                                        {stat.itemType || "Unknown"}
-                                    </div>
-                                    <div
-                                        class="mt-1 flex items-center gap-3 text-xs"
-                                    >
-                                        <span class="text-slate-300"
-                                            >{stat.totalJobs} jobs</span
-                                        >
-                                        <span class="text-green-400"
-                                            >{stat.successful} ✓</span
-                                        >
-                                        <span class="text-red-400"
-                                            >{stat.failed} ✗</span
-                                        >
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-sm font-medium text-white">
-                                        {formatPercent(stat.successRate)}
-                                    </div>
-                                    <div class="text-xs text-slate-400">
-                                        {formatDuration(stat.avgDurationMs)}
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
+                    <div class="h-64">
+                        <canvas bind:this={jobTypeChartCanvas}></canvas>
                     </div>
                 {:else}
                     <p class="text-slate-400">No item type data available</p>
