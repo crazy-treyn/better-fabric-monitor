@@ -205,6 +205,14 @@
                     mode: "index",
                     intersect: false,
                 },
+                onClick: (event, elements) => {
+                    if (elements.length > 0) {
+                        const index = elements[0].index;
+                        const workspaceId = sortedStats[index].workspaceId;
+                        const workspaceName = sortedStats[index].workspaceName;
+                        handleWorkspaceDrillDown(workspaceId, workspaceName);
+                    }
+                },
                 plugins: {
                     legend: {
                         display: true,
@@ -231,14 +239,13 @@
                             afterBody: function (context) {
                                 const index = context[0].dataIndex;
                                 const avgDuration = avgDurations[index];
-                                return `\nAvg Duration: ${formatDuration(avgDuration)}`;
+                                return `\nAvg Duration: ${formatDuration(avgDuration)}\n\nClick to drill down`;
                             },
                         },
                     },
                 },
                 scales: {
                     x: {
-                        stacked: true,
                         beginAtZero: true,
                         ticks: {
                             color: "rgb(148, 163, 184)",
@@ -249,7 +256,6 @@
                         },
                     },
                     y: {
-                        stacked: true,
                         ticks: {
                             color: "rgb(148, 163, 184)",
                         },
@@ -316,6 +322,13 @@
                     mode: "index",
                     intersect: false,
                 },
+                onClick: (event, elements) => {
+                    if (elements.length > 0) {
+                        const index = elements[0].index;
+                        const itemType = sortedStats[index].itemType;
+                        handleJobTypeDrillDown(itemType);
+                    }
+                },
                 plugins: {
                     legend: {
                         display: true,
@@ -342,14 +355,13 @@
                             afterBody: function (context) {
                                 const index = context[0].dataIndex;
                                 const avgDuration = avgDurations[index];
-                                return `\nAvg Duration: ${formatDuration(avgDuration)}`;
+                                return `\nAvg Duration: ${formatDuration(avgDuration)}\n\nClick to drill down`;
                             },
                         },
                     },
                 },
                 scales: {
                     x: {
-                        stacked: true,
                         ticks: {
                             color: "rgb(148, 163, 184)",
                         },
@@ -358,7 +370,6 @@
                         },
                     },
                     y: {
-                        stacked: true,
                         beginAtZero: true,
                         ticks: {
                             color: "rgb(148, 163, 184)",
@@ -419,6 +430,46 @@
         } finally {
             isLoading = false;
         }
+    }
+
+    async function handleWorkspaceDrillDown(workspaceId, workspaceName) {
+        try {
+            selectedWorkspace = { id: workspaceId, name: workspaceName };
+            selectedJobType = null;
+            const result = await window.go.main.App.GetItemStatsByWorkspace(workspaceId, selectedDays);
+            if (result.error) {
+                console.error("Error loading workspace items:", result.error);
+                error = result.error;
+                return;
+            }
+            drillDownData = result.items;
+        } catch (err) {
+            console.error("Failed to drill down into workspace:", err);
+            error = err.message || "Failed to load workspace items";
+        }
+    }
+
+    async function handleJobTypeDrillDown(itemType) {
+        try {
+            selectedJobType = itemType;
+            selectedWorkspace = null;
+            const result = await window.go.main.App.GetItemStatsByJobType(itemType, selectedDays);
+            if (result.error) {
+                console.error("Error loading job type items:", result.error);
+                error = result.error;
+                return;
+            }
+            drillDownData = result.items;
+        } catch (err) {
+            console.error("Failed to drill down into job type:", err);
+            error = err.message || "Failed to load job type items";
+        }
+    }
+
+    function closeDrillDown() {
+        selectedWorkspace = null;
+        selectedJobType = null;
+        drillDownData = null;
     }
 
     function formatDuration(durationMs) {
@@ -683,6 +734,84 @@
                 {/if}
             </div>
         </div>
+
+        <!-- Drill-down Modal -->
+        {#if drillDownData}
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <div class="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-slate-800 border border-slate-700 shadow-2xl">
+                    <!-- Modal Header -->
+                    <div class="sticky top-0 z-10 flex items-center justify-between border-b border-slate-700 bg-slate-800 p-4">
+                        <h2 class="text-xl font-semibold text-white">
+                            {#if selectedWorkspace}
+                                Items in {selectedWorkspace.name}
+                            {:else if selectedJobType}
+                                {selectedJobType} Items
+                            {/if}
+                        </h2>
+                        <button
+                            on:click={closeDrillDown}
+                            class="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+                        >
+                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Modal Content -->
+                    <div class="p-4">
+                        {#if drillDownData.length === 0}
+                            <p class="py-8 text-center text-slate-400">No items found</p>
+                        {:else}
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead class="bg-slate-700">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-300">Item</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-300">Type</th>
+                                            <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-slate-300">Total</th>
+                                            <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-slate-300">Success</th>
+                                            <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-slate-300">Failed</th>
+                                            <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-slate-300">Success Rate</th>
+                                            <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-slate-300">Avg Duration</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-700">
+                                        {#each drillDownData as item}
+                                            <tr class="hover:bg-slate-700/50">
+                                                <td class="px-4 py-3">
+                                                    <div class="text-sm text-white truncate" title={item.itemName}>
+                                                        {item.itemName || item.itemId}
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3 text-sm text-slate-300">
+                                                    {item.itemType || "N/A"}
+                                                </td>
+                                                <td class="px-4 py-3 text-center text-sm font-medium text-white">
+                                                    {item.totalJobs}
+                                                </td>
+                                                <td class="px-4 py-3 text-center text-sm font-medium text-green-400">
+                                                    {item.successful}
+                                                </td>
+                                                <td class="px-4 py-3 text-center text-sm font-medium text-red-400">
+                                                    {item.failed}
+                                                </td>
+                                                <td class="px-4 py-3 text-center text-sm font-medium text-blue-400">
+                                                    {formatPercent(item.successRate)}
+                                                </td>
+                                                <td class="px-4 py-3 text-right text-sm text-slate-300">
+                                                    {formatDuration(item.avgDurationMs)}
+                                                </td>
+                                            </tr>
+                                        {/each}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+            </div>
+        {/if}
 
         <!-- Long Running Jobs -->
         {#if analytics.longRunningJobs && analytics.longRunningJobs.length > 0}

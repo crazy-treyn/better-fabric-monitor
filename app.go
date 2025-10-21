@@ -759,6 +759,56 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	return result
 }
 
+// GetItemStatsByWorkspace returns item-level statistics for a specific workspace
+func (a *App) GetItemStatsByWorkspace(workspaceID string, days int) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+
+	itemStats, err := a.db.GetItemStatsByWorkspace(workspaceID, days)
+	if err != nil {
+		return map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"items": itemStats,
+		"days":  days,
+	}
+}
+
+// GetItemStatsByJobType returns item-level statistics for a specific job type
+func (a *App) GetItemStatsByJobType(itemType string, days int) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+
+	itemStats, err := a.db.GetItemStatsByJobType(itemType, days)
+	if err != nil {
+		return map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"items": itemStats,
+		"days":  days,
+	}
+}
+
 // Greet returns a greeting for the given name (legacy method)
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)

@@ -647,6 +647,104 @@ func (db *Database) GetLongRunningJobs(days int, minDeviationPct float64, limit 
 	return jobs, rows.Err()
 }
 
+// GetItemStatsByWorkspace returns job statistics for each item in a workspace
+func (db *Database) GetItemStatsByWorkspace(workspaceID string, days int) ([]ItemStats, error) {
+	query := `
+		SELECT
+			j.item_id,
+			i.display_name as item_name,
+			i.type as item_type,
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE j.workspace_id = ?
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		GROUP BY j.item_id, i.display_name, i.type
+		ORDER BY total_jobs DESC
+	`
+
+	rows, err := db.conn.Query(query, workspaceID, fmt.Sprintf("%d", days))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []ItemStats
+	for rows.Next() {
+		var s ItemStats
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetItemStatsByJobType returns job statistics for each item of a specific type
+func (db *Database) GetItemStatsByJobType(itemType string, days int) ([]ItemStats, error) {
+	query := `
+		SELECT
+			j.item_id,
+			i.display_name as item_name,
+			i.type as item_type,
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE i.type = ?
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+		GROUP BY j.item_id, i.display_name, i.type
+		ORDER BY total_jobs DESC
+	`
+
+	rows, err := db.conn.Query(query, itemType, fmt.Sprintf("%d", days))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []ItemStats
+	for rows.Next() {
+		var s ItemStats
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
 // GetInProgressJobsByWorkspaceAndItem returns job instances that are in progress for a specific workspace/item
 func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID string) ([]JobInstance, error) {
 	query := `
