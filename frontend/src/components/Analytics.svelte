@@ -649,220 +649,190 @@
 <svelte:window on:click={handleClickOutside} />
 
 <div class="h-full overflow-auto bg-slate-900 p-6">
-    <!-- Header -->
-    <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-3xl font-bold text-white">Analytics Dashboard</h1>
-        <div class="flex items-center gap-3">
-            <label class="text-sm text-slate-300">Time Period:</label>
-            <select
-                bind:value={selectedDays}
-                on:change={loadAnalytics}
-                class="rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-                <option value={1}>Last 24 Hours</option>
-                <option value={7}>Last 7 Days</option>
-                <option value={14}>Last 14 Days</option>
-                <option value={30}>Last 30 Days</option>
-                <option value={90}>Last 90 Days</option>
-            </select>
-            <button
-                on:click={loadAnalytics}
-                disabled={isLoading}
-                class="rounded-md bg-primary-600 px-4 py-2 text-sm text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
-            >
-                {isLoading ? "Loading..." : "Refresh"}
-            </button>
-        </div>
-    </div>
-
-    <!-- Filters Section -->
-    <div class="mb-4 rounded-lg border border-slate-700 bg-slate-800 p-3">
-        <div class="mb-2 flex items-center justify-between">
-            <h2 class="text-base font-semibold text-white">
-                Filters
-                {#if activeFilterCount > 0}
-                    <span class="ml-2 text-xs font-normal text-primary-400">
-                        ({activeFilterCount} active)
-                    </span>
-                {/if}
-            </h2>
-            {#if activeFilterCount > 0}
-                <button
-                    on:click={clearAllFilters}
-                    class="text-xs text-slate-400 hover:text-white transition-colors"
+    <!-- Header with Filters -->
+    <div class="mb-6">
+        <div class="mb-4 flex items-center justify-between">
+            <h1 class="text-3xl font-bold text-white">Analytics Dashboard</h1>
+            <div class="flex items-center gap-3">
+                <label class="text-sm text-slate-300">Time Period:</label>
+                <select
+                    bind:value={selectedDays}
+                    on:change={loadAnalytics}
+                    class="rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
-                    Clear All Filters
+                    <option value={1}>Last 24 Hours</option>
+                    <option value={7}>Last 7 Days</option>
+                    <option value={14}>Last 14 Days</option>
+                    <option value={30}>Last 30 Days</option>
+                    <option value={90}>Last 90 Days</option>
+                </select>
+                <button
+                    on:click={loadAnalytics}
+                    disabled={isLoading}
+                    class="rounded-md bg-primary-600 px-4 py-2 text-sm text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
+                >
+                    {isLoading ? "Loading..." : "Refresh"}
                 </button>
-            {/if}
+            </div>
         </div>
 
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <!-- Workspace Filter -->
-            <div class="relative workspace-dropdown-container">
-                <div class="mb-1 flex items-center justify-between">
-                    <label class="block text-xs font-medium text-slate-300">
-                        Workspaces
-                        {#if selectedWorkspaceIds.size > 0}
-                            <span class="text-primary-400">
-                                ({selectedWorkspaceIds.size})
-                            </span>
-                        {/if}
-                    </label>
-                    {#if selectedWorkspaceIds.size > 0}
+        <!-- Filters Section -->
+        <div class="flex items-center gap-3">
+            <div class="flex flex-1 gap-3">
+                <!-- Workspace Filter -->
+                <div class="relative workspace-dropdown-container flex-1">
+                    <div class="relative">
                         <button
-                            on:click={() => filterStore.clearWorkspaces()}
-                            class="text-xs text-slate-400 hover:text-white"
+                            on:click={() =>
+                                (showWorkspaceDropdown =
+                                    !showWorkspaceDropdown)}
+                            class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                         >
-                            Clear
+                            <span class="mr-2 text-xs text-slate-400"
+                                >Workspaces:</span
+                            >
+                            {#if selectedWorkspaceIds.size === 0}
+                                All Workspaces
+                            {:else if selectedWorkspaceIds.size === 1}
+                                {allWorkspaces.find((ws) =>
+                                    selectedWorkspaceIds.has(ws.id),
+                                )?.displayName ||
+                                    allWorkspaces.find((ws) =>
+                                        selectedWorkspaceIds.has(ws.id),
+                                    )?.id ||
+                                    "1 selected"}
+                            {:else}
+                                {selectedWorkspaceIds.size} selected
+                            {/if}
+                            <span class="float-right">▼</span>
                         </button>
-                    {/if}
-                </div>
-                <div class="relative">
-                    <button
-                        on:click={() =>
-                            (showWorkspaceDropdown = !showWorkspaceDropdown)}
-                        class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                        {selectedWorkspaceIds.size === 0
-                            ? "All Workspaces"
-                            : `${selectedWorkspaceIds.size} selected`}
-                        <span class="float-right">▼</span>
-                    </button>
 
-                    {#if showWorkspaceDropdown}
-                        <div
-                            class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
-                        >
-                            <div class="p-2">
-                                <input
-                                    type="text"
-                                    bind:value={workspaceSearchText}
-                                    placeholder="Search workspaces..."
-                                    class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                />
-                            </div>
-                            <div class="max-h-60 overflow-y-auto p-2">
-                                {#each filteredWorkspacesForDropdown as workspace}
-                                    <label
-                                        class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedWorkspaceIds.has(
-                                                workspace.id,
-                                            )}
-                                            on:change={() =>
-                                                toggleWorkspaceFilter(
+                        {#if showWorkspaceDropdown}
+                            <div
+                                class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
+                            >
+                                <div class="p-2">
+                                    <input
+                                        type="text"
+                                        bind:value={workspaceSearchText}
+                                        placeholder="Search workspaces..."
+                                        class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                </div>
+                                <div class="max-h-60 overflow-y-auto p-2">
+                                    {#each filteredWorkspacesForDropdown as workspace}
+                                        <label
+                                            class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedWorkspaceIds.has(
                                                     workspace.id,
                                                 )}
-                                            class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
-                                        />
-                                        <span class="text-sm text-white">
-                                            {workspace.displayName ||
-                                                workspace.id}
-                                        </span>
-                                    </label>
-                                {/each}
-                                {#if filteredWorkspacesForDropdown.length === 0}
-                                    <p class="p-2 text-sm text-slate-400">
-                                        No matching workspaces
-                                    </p>
-                                {/if}
+                                                on:change={() =>
+                                                    toggleWorkspaceFilter(
+                                                        workspace.id,
+                                                    )}
+                                                class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
+                                            />
+                                            <span class="text-sm text-white">
+                                                {workspace.displayName ||
+                                                    workspace.id}
+                                            </span>
+                                        </label>
+                                    {/each}
+                                    {#if filteredWorkspacesForDropdown.length === 0}
+                                        <p class="p-2 text-sm text-slate-400">
+                                            No matching workspaces
+                                        </p>
+                                    {/if}
+                                </div>
                             </div>
-                        </div>
-                    {/if}
-                </div>
-            </div>
-
-            <!-- Item Type Filter -->
-            <div class="relative itemtype-dropdown-container">
-                <div class="mb-1 flex items-center justify-between">
-                    <label class="block text-xs font-medium text-slate-300">
-                        Item Types
-                        {#if selectedItemTypes.size > 0}
-                            <span class="text-primary-400">
-                                ({selectedItemTypes.size})
-                            </span>
                         {/if}
-                    </label>
-                    {#if selectedItemTypes.size > 0}
+                    </div>
+                </div>
+
+                <!-- Item Type Filter -->
+                <div class="relative itemtype-dropdown-container flex-1">
+                    <div class="relative">
                         <button
-                            on:click={() => {
-                                selectedItemTypes = new Set();
-                                loadAnalytics();
-                            }}
-                            class="text-xs text-slate-400 hover:text-white"
+                            on:click={() =>
+                                (showItemTypeDropdown = !showItemTypeDropdown)}
+                            class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
                         >
-                            Clear
+                            <span class="mr-2 text-xs text-slate-400"
+                                >Item Types:</span
+                            >
+                            {#if selectedItemTypes.size === 0}
+                                All Types
+                            {:else if selectedItemTypes.size === 1}
+                                {Array.from(selectedItemTypes)[0]}
+                            {:else}
+                                {selectedItemTypes.size} selected
+                            {/if}
+                            <span class="float-right">▼</span>
                         </button>
-                    {/if}
-                </div>
-                <div class="relative">
-                    <button
-                        on:click={() =>
-                            (showItemTypeDropdown = !showItemTypeDropdown)}
-                        class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    >
-                        {selectedItemTypes.size === 0
-                            ? "All Types"
-                            : `${selectedItemTypes.size} selected`}
-                        <span class="float-right">▼</span>
-                    </button>
 
-                    {#if showItemTypeDropdown}
-                        <div
-                            class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
-                        >
-                            <div class="p-2">
-                                <input
-                                    type="text"
-                                    bind:value={itemTypeSearchText}
-                                    placeholder="Search types..."
-                                    class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                />
+                        {#if showItemTypeDropdown}
+                            <div
+                                class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
+                            >
+                                <div class="p-2">
+                                    <input
+                                        type="text"
+                                        bind:value={itemTypeSearchText}
+                                        placeholder="Search types..."
+                                        class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                </div>
+                                <div class="max-h-60 overflow-y-auto p-2">
+                                    {#each filteredItemTypesForDropdown as itemType}
+                                        <label
+                                            class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedItemTypes.has(
+                                                    itemType,
+                                                )}
+                                                on:change={() =>
+                                                    toggleItemTypeFilter(
+                                                        itemType,
+                                                    )}
+                                                class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
+                                            />
+                                            <span class="text-sm text-white">
+                                                {itemType}
+                                            </span>
+                                        </label>
+                                    {/each}
+                                    {#if filteredItemTypesForDropdown.length === 0}
+                                        <p class="p-2 text-sm text-slate-400">
+                                            No matching types
+                                        </p>
+                                    {/if}
+                                </div>
                             </div>
-                            <div class="max-h-60 overflow-y-auto p-2">
-                                {#each filteredItemTypesForDropdown as itemType}
-                                    <label
-                                        class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedItemTypes.has(
-                                                itemType,
-                                            )}
-                                            on:change={() =>
-                                                toggleItemTypeFilter(itemType)}
-                                            class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
-                                        />
-                                        <span class="text-sm text-white">
-                                            {itemType}
-                                        </span>
-                                    </label>
-                                {/each}
-                                {#if filteredItemTypesForDropdown.length === 0}
-                                    <p class="p-2 text-sm text-slate-400">
-                                        No matching types
-                                    </p>
-                                {/if}
-                            </div>
-                        </div>
-                    {/if}
+                        {/if}
+                    </div>
                 </div>
-            </div>
 
-            <!-- Item Name Search -->
-            <div>
-                <label class="mb-1 block text-xs font-medium text-slate-300">
-                    Item Name Search
-                </label>
-                <input
-                    type="text"
-                    bind:value={itemNameSearch}
-                    on:input={handleItemNameSearchChange}
-                    placeholder="Search by item name..."
-                    class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+                <!-- Item Name Search -->
+                <div class="flex-1">
+                    <input
+                        type="text"
+                        bind:value={itemNameSearch}
+                        on:input={handleItemNameSearchChange}
+                        placeholder="Search by item name..."
+                        class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                </div>
+                <button
+                    on:click={clearAllFilters}
+                    class="rounded-md border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-600 hover:text-white transition-colors"
+                >
+                    Clear All
+                </button>
             </div>
         </div>
     </div>
