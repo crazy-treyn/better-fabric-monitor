@@ -289,6 +289,7 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 		"SparkJobDefinition": true,
 		"Dataflow":           true,
 		"ApacheAirflowJob":   true,
+		"SemanticModel":      true,
 	}
 
 	if startTimeFrom != nil {
