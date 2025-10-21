@@ -95,6 +95,28 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
+// shutdown is called when the app is closing
+func (a *App) shutdown(ctx context.Context) {
+	fmt.Println("Shutting down application...")
+
+	// Close database connection
+	if a.db != nil {
+		if err := a.db.Close(); err != nil {
+			fmt.Printf("Error closing database: %v\n", err)
+		} else {
+			fmt.Println("Database connection closed successfully")
+		}
+	}
+
+	// Clean up authentication if needed
+	if a.auth != nil {
+		// Auth cleanup is already handled by Logout if needed
+		fmt.Println("Authentication cleanup complete")
+	}
+
+	fmt.Println("Shutdown complete")
+}
+
 // Login initiates the authentication flow
 func (a *App) Login(tenantID string) map[string]interface{} {
 	if a.auth == nil {
