@@ -7,7 +7,7 @@
     let workspaces = [];
     let jobs = [];
     let isLoading = true;
-    let sidebarWidth = 256; // Default width in pixels (w-64 = 16rem = 256px)
+    let sidebarWidth = 350; // Default width in pixels (~20% wider than 256px)
     let isResizing = false;
     let currentView = "jobs"; // 'jobs' or 'analytics'
 
@@ -299,10 +299,10 @@
             <div class="h-full flex">
                 <!-- Sidebar -->
                 <div
-                    class="bg-slate-800 border-r border-slate-700 p-4 flex flex-col overflow-hidden"
+                    class="bg-slate-800 border-r border-slate-700 flex flex-col overflow-hidden"
                     style="width: {sidebarWidth}px; min-width: 200px; max-width: 500px;"
                 >
-                    <div class="mb-4">
+                    <div class="p-4">
                         <div class="flex items-center justify-between mb-2">
                             <h2 class="text-lg font-semibold text-white">
                                 Workspaces
@@ -341,9 +341,7 @@
                         </div>
                     </div>
 
-                    <div
-                        class="space-y-2 overflow-y-auto flex-1 overflow-x-hidden"
-                    >
+                    <div class="space-y-2 overflow-y-auto flex-1 px-4 pb-4">
                         {#each filteredWorkspaces as workspace}
                             <div
                                 class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors {selectedWorkspaceIds.has(
@@ -354,7 +352,7 @@
                                 title={workspace.displayName || workspace.id}
                             >
                                 <label
-                                    class="flex items-start gap-2 cursor-pointer"
+                                    class="flex items-center gap-2 cursor-pointer"
                                 >
                                     <input
                                         type="checkbox"
@@ -366,7 +364,7 @@
                                                 workspace.id,
                                                 e,
                                             )}
-                                        class="mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-0"
+                                        class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600 focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 flex-shrink-0"
                                     />
                                     <div class="flex-1 min-w-0">
                                         <h3
@@ -375,11 +373,6 @@
                                             {workspace.displayName ||
                                                 workspace.id}
                                         </h3>
-                                        <p
-                                            class="text-xs text-slate-400 truncate"
-                                        >
-                                            {workspace.type}
-                                        </p>
                                     </div>
                                 </label>
                             </div>
