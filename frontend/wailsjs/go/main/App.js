@@ -10,6 +10,14 @@ export function GetAnalytics(arg1) {
   return window['go']['main']['App']['GetAnalytics'](arg1);
 }
 
+export function GetItemStatsByJobType(arg1, arg2) {
+  return window['go']['main']['App']['GetItemStatsByJobType'](arg1, arg2);
+}
+
+export function GetItemStatsByWorkspace(arg1, arg2) {
+  return window['go']['main']['App']['GetItemStatsByWorkspace'](arg1, arg2);
+}
+
 export function GetJobs() {
   return window['go']['main']['App']['GetJobs']();
 }

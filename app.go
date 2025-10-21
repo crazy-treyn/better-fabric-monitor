@@ -379,14 +379,16 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// Check for last sync time to enable incremental loading
-	// Use the max start_time from completed jobs (jobs with end_time) to ensure we don't miss any jobs
+	// GetMaxJobStartTime returns either:
+	// - The MIN start_time of in-progress jobs (to re-check them for completion), OR
+	// - The MAX start_time of completed jobs (if no in-progress jobs exist)
 	var startTimeFrom *time.Time
 	var cachedItemsByWorkspace map[string][]fabric.Item
 	if a.db != nil {
 		maxStartTime, err := a.db.GetMaxJobStartTime()
 		if err == nil && maxStartTime != nil {
 			startTimeFrom = maxStartTime
-			fmt.Printf("Max completed job start time: %s, doing incremental load\n", maxStartTime.Format(time.RFC3339))
+			fmt.Printf("Incremental load starting from: %s\n", maxStartTime.Format(time.RFC3339))
 
 			// For incremental syncs, load cached items from database to avoid API calls
 			cachedItemsByWorkspace = make(map[string][]fabric.Item)
@@ -413,7 +415,8 @@ func (a *App) GetJobs() []map[string]interface{} {
 		} else {
 			fmt.Println("No previous jobs found, doing full load")
 		}
-	} // Get recent jobs across all workspaces (no limit - return all)
+	}
+	// Get recent jobs across all workspaces (no limit - return all)
 	// Pass startTimeFrom for incremental sync (will also fetch all in-progress jobs)
 	// Pass cachedItemsByWorkspace to avoid fetching items from API during incremental syncs
 	jobs, newItems, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom, cachedItemsByWorkspace)
@@ -426,6 +429,12 @@ func (a *App) GetJobs() []map[string]interface{} {
 				"status":          "Error",
 			},
 		}
+	}
+
+	// If doing incremental sync, get cached jobs BEFORE persisting to database
+	var cachedJobs []map[string]interface{}
+	if startTimeFrom != nil && a.db != nil {
+		cachedJobs = a.GetJobsFromCache()
 	}
 
 	// Persist jobs to DuckDB
@@ -529,28 +538,34 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
-	if startTimeFrom != nil && a.db != nil {
+	if startTimeFrom != nil && a.db != nil && len(cachedJobs) > 0 {
 		fmt.Println("Merging fresh jobs with cached historical data...")
-		cachedJobs := a.GetJobsFromCache()
 
-		// Create a map of fresh job IDs for deduplication
-		freshJobIDs := make(map[string]bool)
+		// Create a map of fresh jobs by ID for quick lookup
+		freshJobMap := make(map[string]map[string]interface{})
 		for _, job := range jobs {
 			if id, ok := job["id"].(string); ok {
-				freshJobIDs[id] = true
+				freshJobMap[id] = job
 			}
 		}
+
+		// Start with fresh jobs (these have the latest data)
+		mergedJobs := make([]map[string]interface{}, 0, len(cachedJobs))
+		mergedJobs = append(mergedJobs, jobs...)
 
 		// Add cached jobs that aren't in the fresh results
 		for _, cachedJob := range cachedJobs {
 			if id, ok := cachedJob["id"].(string); ok {
-				if !freshJobIDs[id] {
-					jobs = append(jobs, cachedJob)
+				if _, exists := freshJobMap[id]; !exists {
+					mergedJobs = append(mergedJobs, cachedJob)
 				}
 			}
 		}
 
-		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d)\n", len(jobs), len(freshJobIDs), len(cachedJobs))
+		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d, replaced: %d)\n",
+			len(mergedJobs), len(jobs), len(cachedJobs), len(freshJobMap))
+
+		return mergedJobs
 	}
 
 	return jobs
@@ -705,8 +720,8 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		result["itemTypeStats"] = itemTypeStats
 	}
 
-	// Get recent failures (last 10)
-	recentFailures, err := a.db.GetRecentFailures(10)
+	// Get recent failures (last 10 within the time period)
+	recentFailures, err := a.db.GetRecentFailures(10, days)
 	if err != nil {
 		fmt.Printf("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
@@ -723,60 +738,75 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		result["longRunningJobs"] = longRunningJobs
 	}
 
-	// Calculate overall stats for the period
-	filter := db.JobFilter{}
-	from := time.Now().AddDate(0, 0, -days)
-	filter.StartDateFrom = &from
-
-	allJobs, err := a.db.GetJobInstances(filter)
+	// Get overall stats - calculated entirely in DuckDB for consistency
+	overallStats, err := a.db.GetOverallStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get jobs for overall stats: %v\n", err)
+		fmt.Printf("Failed to get overall stats: %v\n", err)
+		result["overallStatsError"] = err.Error()
 	} else {
-		totalJobs := len(allJobs)
-		successful := 0
-		failed := 0
-		running := 0
-		var totalDuration int64 = 0
-		completedCount := 0
-
-		for _, job := range allJobs {
-			switch job.Status {
-			case "Completed":
-				successful++
-				if job.DurationMs != nil {
-					totalDuration += *job.DurationMs
-					completedCount++
-				}
-			case "Failed":
-				failed++
-			case "InProgress", "Running", "NotStarted":
-				running++
-			}
-		}
-
-		avgDuration := float64(0)
-		if completedCount > 0 {
-			avgDuration = float64(totalDuration) / float64(completedCount)
-		}
-
-		successRate := float64(0)
-		if totalJobs > 0 {
-			successRate = float64(successful) / float64(totalJobs) * 100
-		}
-
 		result["overallStats"] = map[string]interface{}{
-			"totalJobs":     totalJobs,
-			"successful":    successful,
-			"failed":        failed,
-			"running":       running,
-			"successRate":   successRate,
-			"avgDurationMs": avgDuration,
+			"totalJobs":     overallStats.TotalJobs,
+			"successful":    overallStats.Successful,
+			"failed":        overallStats.Failed,
+			"running":       overallStats.Running,
+			"successRate":   overallStats.SuccessRate,
+			"avgDurationMs": overallStats.AvgDurationMs,
 		}
 	}
 
 	result["days"] = days
 
 	return result
+}
+
+// GetItemStatsByWorkspace returns item-level statistics for a specific workspace
+func (a *App) GetItemStatsByWorkspace(workspaceID string, days int) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+
+	itemStats, err := a.db.GetItemStatsByWorkspace(workspaceID, days)
+	if err != nil {
+		return map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"items": itemStats,
+		"days":  days,
+	}
+}
+
+// GetItemStatsByJobType returns item-level statistics for a specific job type
+func (a *App) GetItemStatsByJobType(itemType string, days int) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+
+	itemStats, err := a.db.GetItemStatsByJobType(itemType, days)
+	if err != nil {
+		return map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"items": itemStats,
+		"days":  days,
+	}
 }
 
 // Greet returns a greeting for the given name (legacy method)

@@ -84,6 +84,7 @@ type JobStats struct {
 	TotalJobs     int     `json:"totalJobs"`
 	Successful    int     `json:"successful"`
 	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
 	SuccessRate   float64 `json:"successRate"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }
@@ -150,4 +151,17 @@ type LongRunningJob struct {
 	DurationMs      int64     `json:"durationMs"`
 	AvgDurationMs   float64   `json:"avgDurationMs"`
 	DeviationPct    float64   `json:"deviationPct"`
+}
+
+// ItemStats represents job statistics by individual item
+type ItemStats struct {
+	ItemID        string  `json:"itemId"`
+	ItemName      string  `json:"itemName"`
+	ItemType      string  `json:"itemType"`
+	TotalJobs     int     `json:"totalJobs"`
+	Successful    int     `json:"successful"`
+	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
+	SuccessRate   float64 `json:"successRate"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
 }
