@@ -428,6 +428,12 @@ func (a *App) GetJobs() []map[string]interface{} {
 		}
 	}
 
+	// If doing incremental sync, get cached jobs BEFORE persisting to database
+	var cachedJobs []map[string]interface{}
+	if startTimeFrom != nil && a.db != nil {
+		cachedJobs = a.GetJobsFromCache()
+	}
+
 	// Persist jobs to DuckDB
 	if a.db != nil && len(jobs) > 0 {
 		// First, persist any new items from the API (for full syncs or new items discovered)
@@ -529,28 +535,34 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
-	if startTimeFrom != nil && a.db != nil {
+	if startTimeFrom != nil && a.db != nil && len(cachedJobs) > 0 {
 		fmt.Println("Merging fresh jobs with cached historical data...")
-		cachedJobs := a.GetJobsFromCache()
 
-		// Create a map of fresh job IDs for deduplication
-		freshJobIDs := make(map[string]bool)
+		// Create a map of fresh jobs by ID for quick lookup
+		freshJobMap := make(map[string]map[string]interface{})
 		for _, job := range jobs {
 			if id, ok := job["id"].(string); ok {
-				freshJobIDs[id] = true
+				freshJobMap[id] = job
 			}
 		}
+
+		// Start with fresh jobs (these have the latest data)
+		mergedJobs := make([]map[string]interface{}, 0, len(cachedJobs))
+		mergedJobs = append(mergedJobs, jobs...)
 
 		// Add cached jobs that aren't in the fresh results
 		for _, cachedJob := range cachedJobs {
 			if id, ok := cachedJob["id"].(string); ok {
-				if !freshJobIDs[id] {
-					jobs = append(jobs, cachedJob)
+				if _, exists := freshJobMap[id]; !exists {
+					mergedJobs = append(mergedJobs, cachedJob)
 				}
 			}
 		}
 
-		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d)\n", len(jobs), len(freshJobIDs), len(cachedJobs))
+		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d, replaced: %d)\n",
+			len(mergedJobs), len(jobs), len(cachedJobs), len(freshJobMap))
+
+		return mergedJobs
 	}
 
 	return jobs

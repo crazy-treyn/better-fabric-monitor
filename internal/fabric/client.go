@@ -61,6 +61,8 @@ type Client struct {
 	httpClient  *http.Client
 	baseURL     string
 	accessToken string
+	rateLimiter *AdaptiveRateLimiter
+	retryPolicy *RetryPolicy
 }
 
 // NewClient creates a new Fabric API client
@@ -71,7 +73,26 @@ func NewClient(accessToken string) *Client {
 		},
 		baseURL:     "https://api.fabric.microsoft.com/v1",
 		accessToken: accessToken,
+		rateLimiter: NewAdaptiveRateLimiter(),
+		retryPolicy: NewRetryPolicy(),
 	}
+}
+
+// doRequestWithRetry performs an HTTP request with rate limiting and retry logic
+func (c *Client) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+	// Wait for rate limiter token
+	c.rateLimiter.Wait()
+
+	// Execute with retry logic
+	return c.retryPolicy.ExecuteWithRetry(
+		func() (*http.Response, error) {
+			return c.httpClient.Do(req)
+		},
+		func() {
+			// On throttle detected
+			c.rateLimiter.OnThrottle()
+		},
+	)
 }
 
 // Workspace represents a Fabric workspace
@@ -169,7 +190,7 @@ func (c *Client) GetWorkspaces(ctx context.Context) ([]Workspace, error) {
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.doRequestWithRetry(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -209,7 +230,7 @@ func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID string) ([]I
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.doRequestWithRetry(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -254,7 +275,7 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.doRequestWithRetry(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -279,17 +300,12 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 	return allInstances, nil
 }
 
-// GetRecentJobs retrieves recent job instances across all workspaces in Fabric
+// GetRecentJobs retrieves recent job instances across all workspaces in Fabric with parallel processing
 // If startTimeFrom is provided, only fetches jobs with start_time > startTimeFrom
 // Always fetches jobs with end_time IS NULL (in progress) regardless of start time
 // cachedItems can be provided to avoid fetching items from API (optimization for incremental syncs)
 func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limit int, startTimeFrom *time.Time, cachedItems map[string][]Item) ([]map[string]interface{}, []Item, error) {
-	var allJobs []map[string]interface{}
-	itemCache := make(map[string]Item) // Cache item details
-	var allItems []Item                // Track all items for persistence
-
-	// Item types that support job instances based on Microsoft Fabric documentation
-	// https://learn.microsoft.com/en-us/rest/api/fabric/core/job-scheduler/list-item-job-instances
+	// Item types that support job instances
 	supportedTypes := map[string]bool{
 		"DataPipeline":       true,
 		"Notebook":           true,
@@ -300,123 +316,187 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 
 	if startTimeFrom != nil {
 		fmt.Printf("Fetching jobs from %d workspaces (incremental sync from %s)...\n", len(workspaces), startTimeFrom.Format(time.RFC3339))
+		fmt.Printf("Rate limiter: %d RPS\n", c.rateLimiter.GetCurrentRPS())
 	} else {
 		fmt.Printf("Fetching jobs from %d workspaces (full sync)...\n", len(workspaces))
+		fmt.Printf("Rate limiter: %d RPS\n", c.rateLimiter.GetCurrentRPS())
 	}
 
-	apiCallCount := 0
+	startTime := time.Now()
+
+	// Create workspace worker pool
+	workspacePool := NewWorkerPool(MaxWorkspaceConcurrency)
+
+	// Channel to collect results
+	workspaceResults := make(chan WorkspaceResult, len(workspaces))
+
+	// Process each workspace in parallel
 	for _, workspace := range workspaces {
-		fmt.Printf("Checking workspace: %s (%s)\n", workspace.DisplayName, workspace.ID)
+		workspace := workspace // Capture for goroutine
 
-		// Always get all items in the workspace from API to discover new items
-		// This ensures we don't miss any newly created items since the last sync
-		items, err := c.GetWorkspaceItems(ctx, workspace.ID)
-		apiCallCount++
-		if err != nil {
-			fmt.Printf("Warning: failed to get items for workspace %s: %v\n", workspace.ID, err)
-			continue
-		}
-		allItems = append(allItems, items...) // Track for persistence
-
-		// Add delay after API call to avoid rate limiting
-		time.Sleep(200 * time.Millisecond) // Filter to only items that support job instances
-		var supportedItems []Item
-		for _, item := range items {
-			if supportedTypes[item.Type] {
-				supportedItems = append(supportedItems, item)
+		workspacePool.Submit(ctx, func() error {
+			result := WorkspaceResult{
+				WorkspaceID:   workspace.ID,
+				WorkspaceName: workspace.DisplayName,
+				Jobs:          []map[string]interface{}{},
+				Items:         []Item{},
 			}
-		}
 
-		fmt.Printf("Found %d total items, %d with job support in workspace %s\n",
-			len(items), len(supportedItems), workspace.DisplayName)
-
-		// Cache items
-		for _, item := range supportedItems {
-			itemCache[item.ID] = item
-		}
-
-		// Get job instances for each supported item
-		for i, item := range supportedItems {
-			fmt.Printf("[%d/%d] Getting job instances for %s (%s)...\n", i+1, len(supportedItems), item.DisplayName, item.Type)
-
-			instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID)
-			apiCallCount++
+			// Get items for this workspace
+			items, err := c.GetWorkspaceItems(ctx, workspace.ID)
 			if err != nil {
-				fmt.Printf("Warning: failed to get job instances for %s: %v\n", item.DisplayName, err)
-				// Add delay even on error to respect rate limits
-				time.Sleep(300 * time.Millisecond)
-				continue
+				result.Error = fmt.Errorf("failed to get items: %w", err)
+				workspaceResults <- result
+				return nil // Continue with other workspaces
 			}
 
-			// Filter jobs based on incremental sync criteria
-			var filteredInstances []JobInstance
-			for _, instance := range instances {
-				// Always include jobs with no end time (in progress)
-				if instance.EndTimeUtc.Time.IsZero() {
-					filteredInstances = append(filteredInstances, instance)
+			result.Items = items
+
+			// Filter to supported items
+			var supportedItems []Item
+			for _, item := range items {
+				if supportedTypes[item.Type] {
+					supportedItems = append(supportedItems, item)
+				}
+			}
+
+			fmt.Printf("[%s] Found %d items, %d with job support\n",
+				workspace.DisplayName, len(items), len(supportedItems))
+
+			if len(supportedItems) == 0 {
+				workspaceResults <- result
+				return nil
+			}
+
+			// Create item worker pool for this workspace
+			itemPool := NewWorkerPool(MaxItemConcurrency)
+			itemResults := make(chan ItemResult, len(supportedItems))
+
+			// Process each item in parallel
+			for _, item := range supportedItems {
+				item := item // Capture for goroutine
+
+				itemPool.Submit(ctx, func() error {
+					itemResult := ItemResult{
+						WorkspaceID:   workspace.ID,
+						WorkspaceName: workspace.DisplayName,
+						Item:          item,
+						Jobs:          []map[string]interface{}{},
+					}
+
+					instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID)
+					if err != nil {
+						itemResult.Error = fmt.Errorf("failed to get job instances: %w", err)
+						itemResults <- itemResult
+						return nil
+					}
+
+					// Filter jobs based on incremental sync criteria
+					var filteredInstances []JobInstance
+					for _, instance := range instances {
+						// Always include jobs with no end time (in progress)
+						if instance.EndTimeUtc.Time.IsZero() {
+							filteredInstances = append(filteredInstances, instance)
+							continue
+						}
+
+						// If doing incremental sync, only include jobs newer than last sync
+						if startTimeFrom != nil {
+							if instance.StartTimeUtc.Time.After(*startTimeFrom) {
+								filteredInstances = append(filteredInstances, instance)
+							}
+						} else {
+							// Full sync - include all jobs
+							filteredInstances = append(filteredInstances, instance)
+						}
+					}
+
+					// Convert to map format for frontend
+					for _, instance := range filteredInstances {
+						job := map[string]interface{}{
+							"id":              instance.ID,
+							"workspaceId":     workspace.ID,
+							"workspaceName":   workspace.DisplayName,
+							"itemId":          item.ID,
+							"itemDisplayName": item.DisplayName,
+							"itemType":        item.Type,
+							"jobType":         instance.JobType,
+							"status":          instance.Status,
+							"startTime":       instance.StartTimeUtc.Time.Format(time.RFC3339),
+						}
+
+						if !instance.EndTimeUtc.Time.IsZero() {
+							job["endTime"] = instance.EndTimeUtc.Time.Format(time.RFC3339)
+							duration := instance.EndTimeUtc.Time.Sub(instance.StartTimeUtc.Time)
+							job["durationMs"] = int64(duration / time.Millisecond)
+						}
+
+						failureReason := instance.GetFailureReasonString()
+						if failureReason != "" {
+							job["failureReason"] = failureReason
+						}
+
+						itemResult.Jobs = append(itemResult.Jobs, job)
+					}
+
+					itemResults <- itemResult
+					return nil
+				})
+			}
+
+			// Wait for all items to complete
+			itemPool.Wait()
+			close(itemResults)
+
+			// Collect item results
+			for itemResult := range itemResults {
+				if itemResult.Error != nil {
+					fmt.Printf("  [%s] Warning: %v\n", itemResult.Item.DisplayName, itemResult.Error)
 					continue
 				}
-
-				// If doing incremental sync, only include jobs newer than last sync
-				if startTimeFrom != nil {
-					if instance.StartTimeUtc.Time.After(*startTimeFrom) {
-						filteredInstances = append(filteredInstances, instance)
-					}
-				} else {
-					// Full sync - include all jobs
-					filteredInstances = append(filteredInstances, instance)
-				}
+				result.Jobs = append(result.Jobs, itemResult.Jobs...)
 			}
 
-			if len(filteredInstances) > 0 {
-				fmt.Printf("Found %d job instances for %s", len(filteredInstances), item.DisplayName)
-				if startTimeFrom != nil {
-					fmt.Printf(" (%d total, %d new/in-progress)\n", len(instances), len(filteredInstances))
-				} else {
-					fmt.Println()
-				}
-			}
-
-			// Add delay to avoid rate limiting (200-300ms between requests)
-			time.Sleep(200 * time.Millisecond)
-
-			// Convert to map format for frontend
-			for _, instance := range filteredInstances {
-				job := map[string]interface{}{
-					"id":              instance.ID,
-					"workspaceId":     workspace.ID,
-					"workspaceName":   workspace.DisplayName,
-					"itemId":          item.ID,
-					"itemDisplayName": item.DisplayName,
-					"itemType":        item.Type,
-					"jobType":         instance.JobType,
-					"status":          instance.Status,
-					"startTime":       instance.StartTimeUtc.Time.Format(time.RFC3339),
-				}
-
-				if !instance.EndTimeUtc.Time.IsZero() {
-					job["endTime"] = instance.EndTimeUtc.Time.Format(time.RFC3339)
-					duration := instance.EndTimeUtc.Time.Sub(instance.StartTimeUtc.Time)
-					job["durationMs"] = int64(duration / time.Millisecond)
-				}
-
-				failureReason := instance.GetFailureReasonString()
-				if failureReason != "" {
-					job["failureReason"] = failureReason
-				}
-
-				allJobs = append(allJobs, job)
-			}
-		}
+			workspaceResults <- result
+			return nil
+		})
 	}
 
-	fmt.Printf("Total jobs found: %d (made %d API calls)\n", len(allJobs), apiCallCount)
+	// Wait for all workspaces to complete
+	workspacePool.Wait()
+	close(workspaceResults)
+
+	// Collect all results
+	var allJobs []map[string]interface{}
+	var allItems []Item
+	var errors []string
+
+	for result := range workspaceResults {
+		if result.Error != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", result.WorkspaceName, result.Error))
+			continue
+		}
+		allJobs = append(allJobs, result.Jobs...)
+		allItems = append(allItems, result.Items...)
+	}
+
+	elapsed := time.Since(startTime)
+	fmt.Printf("\nCompleted in %v\n", elapsed)
+	fmt.Printf("Total jobs found: %d across %d workspaces\n", len(allJobs), len(workspaces))
+	fmt.Printf("Final rate limiter: %d RPS\n", c.rateLimiter.GetCurrentRPS())
+
+	if len(errors) > 0 {
+		fmt.Printf("Errors encountered: %d\n", len(errors))
+		for _, err := range errors {
+			fmt.Printf("  - %s\n", err)
+		}
+	}
 
 	// Sort by start time (most recent first)
 	sort.Slice(allJobs, func(i, j int) bool {
 		timeI, _ := time.Parse(time.RFC3339, allJobs[i]["startTime"].(string))
 		timeJ, _ := time.Parse(time.RFC3339, allJobs[j]["startTime"].(string))
-		return timeI.After(timeJ) // Most recent first
+		return timeI.After(timeJ)
 	})
 
 	// Limit results (0 means no limit)
