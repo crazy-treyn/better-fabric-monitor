@@ -720,8 +720,8 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		result["itemTypeStats"] = itemTypeStats
 	}
 
-	// Get recent failures (last 10)
-	recentFailures, err := a.db.GetRecentFailures(10)
+	// Get recent failures (last 10 within the time period)
+	recentFailures, err := a.db.GetRecentFailures(10, days)
 	if err != nil {
 		fmt.Printf("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
@@ -738,54 +738,19 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		result["longRunningJobs"] = longRunningJobs
 	}
 
-	// Calculate overall stats for the period
-	filter := db.JobFilter{}
-	from := time.Now().AddDate(0, 0, -days)
-	filter.StartDateFrom = &from
-
-	allJobs, err := a.db.GetJobInstances(filter)
+	// Get overall stats - calculated entirely in DuckDB for consistency
+	overallStats, err := a.db.GetOverallStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get jobs for overall stats: %v\n", err)
+		fmt.Printf("Failed to get overall stats: %v\n", err)
+		result["overallStatsError"] = err.Error()
 	} else {
-		totalJobs := len(allJobs)
-		successful := 0
-		failed := 0
-		running := 0
-		var totalDuration int64 = 0
-		completedCount := 0
-
-		for _, job := range allJobs {
-			switch job.Status {
-			case "Completed":
-				successful++
-				if job.DurationMs != nil {
-					totalDuration += *job.DurationMs
-					completedCount++
-				}
-			case "Failed":
-				failed++
-			case "InProgress", "Running", "NotStarted":
-				running++
-			}
-		}
-
-		avgDuration := float64(0)
-		if completedCount > 0 {
-			avgDuration = float64(totalDuration) / float64(completedCount)
-		}
-
-		successRate := float64(0)
-		if totalJobs > 0 {
-			successRate = float64(successful) / float64(totalJobs) * 100
-		}
-
 		result["overallStats"] = map[string]interface{}{
-			"totalJobs":     totalJobs,
-			"successful":    successful,
-			"failed":        failed,
-			"running":       running,
-			"successRate":   successRate,
-			"avgDurationMs": avgDuration,
+			"totalJobs":     overallStats.TotalJobs,
+			"successful":    overallStats.Successful,
+			"failed":        overallStats.Failed,
+			"running":       overallStats.Running,
+			"successRate":   overallStats.SuccessRate,
+			"avgDurationMs": overallStats.AvgDurationMs,
 		}
 	}
 

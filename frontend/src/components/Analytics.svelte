@@ -1,10 +1,131 @@
 <script>
-    import { onMount } from "svelte";
+    import { onMount, afterUpdate } from "svelte";
+    import Chart from "chart.js/auto";
 
     let analytics = null;
     let isLoading = true;
     let selectedDays = 7;
     let error = null;
+    let chartCanvas;
+    let chartInstance = null;
+
+    onMount(async () => {
+        await loadAnalytics();
+    });
+
+    afterUpdate(() => {
+        // Update chart when analytics data changes
+        if (
+            chartCanvas &&
+            analytics?.dailyStats &&
+            analytics.dailyStats.length > 0
+        ) {
+            updateChart();
+        }
+    });
+
+    function updateChart() {
+        // Destroy existing chart if it exists
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        if (
+            !chartCanvas ||
+            !analytics?.dailyStats ||
+            analytics.dailyStats.length === 0
+        ) {
+            return;
+        }
+
+        const ctx = chartCanvas.getContext("2d");
+
+        // Prepare data - reverse to show chronological order (oldest to newest)
+        const labels = analytics.dailyStats.map((stat) => {
+            const date = new Date(stat.date);
+            return date.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+            });
+        });
+
+        const successfulData = analytics.dailyStats.map(
+            (stat) => stat.successful,
+        );
+        const failedData = analytics.dailyStats.map((stat) => stat.failed);
+
+        chartInstance = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: "Successful",
+                        data: successfulData,
+                        borderColor: "rgb(74, 222, 128)",
+                        backgroundColor: "rgba(74, 222, 128, 0.1)",
+                        tension: 0.3,
+                        fill: true,
+                    },
+                    {
+                        label: "Failed",
+                        data: failedData,
+                        borderColor: "rgb(248, 113, 113)",
+                        backgroundColor: "rgba(248, 113, 113, 0.1)",
+                        tension: 0.3,
+                        fill: true,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: "index",
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: "top",
+                        labels: {
+                            color: "rgb(203, 213, 225)",
+                            font: {
+                                size: 12,
+                            },
+                        },
+                    },
+                    tooltip: {
+                        backgroundColor: "rgba(15, 23, 42, 0.9)",
+                        titleColor: "rgb(226, 232, 240)",
+                        bodyColor: "rgb(203, 213, 225)",
+                        borderColor: "rgb(71, 85, 105)",
+                        borderWidth: 1,
+                    },
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                            stepSize: 1,
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                    x: {
+                        ticks: {
+                            color: "rgb(148, 163, 184)",
+                        },
+                        grid: {
+                            color: "rgba(71, 85, 105, 0.3)",
+                        },
+                    },
+                },
+            },
+        });
+    }
 
     onMount(async () => {
         await loadAnalytics();
@@ -223,41 +344,8 @@
                     Daily Trend
                 </h2>
                 {#if analytics.dailyStats && analytics.dailyStats.length > 0}
-                    <div class="space-y-2">
-                        {#each analytics.dailyStats as stat}
-                            <div
-                                class="flex items-center justify-between rounded-md bg-slate-700/50 p-3"
-                            >
-                                <div class="flex-1">
-                                    <div class="text-sm font-medium text-white">
-                                        {formatDate(stat.date)}
-                                    </div>
-                                    <div
-                                        class="mt-1 flex items-center gap-3 text-xs"
-                                    >
-                                        <span class="text-green-400"
-                                            >{stat.successful} ✓</span
-                                        >
-                                        <span class="text-red-400"
-                                            >{stat.failed} ✗</span
-                                        >
-                                        {#if stat.running > 0}
-                                            <span class="text-blue-400"
-                                                >{stat.running} ⟳</span
-                                            >
-                                        {/if}
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-sm font-medium text-white">
-                                        {formatPercent(stat.successRate)}
-                                    </div>
-                                    <div class="text-xs text-slate-400">
-                                        {formatDuration(stat.avgDurationMs)}
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
+                    <div class="h-64">
+                        <canvas bind:this={chartCanvas}></canvas>
                     </div>
                 {:else}
                     <p class="text-slate-400">No daily data available</p>

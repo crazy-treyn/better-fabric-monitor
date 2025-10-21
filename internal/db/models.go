@@ -84,6 +84,7 @@ type JobStats struct {
 	TotalJobs     int     `json:"totalJobs"`
 	Successful    int     `json:"successful"`
 	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
 	SuccessRate   float64 `json:"successRate"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }

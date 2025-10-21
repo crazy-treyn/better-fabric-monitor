@@ -231,6 +231,43 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	return jobs, rows.Err()
 }
 
+// GetOverallStats returns aggregated statistics for the specified time period
+func (db *Database) GetOverallStats(days int) (*JobStats, error) {
+	query := `
+		SELECT
+			COUNT(*) as total_jobs,
+			SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			AVG(CASE WHEN status = 'Completed' AND duration_ms IS NOT NULL THEN duration_ms ELSE NULL END) as avg_duration_ms
+		FROM job_instances
+		WHERE start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
+	`
+
+	var stats JobStats
+	var avgDuration sql.NullFloat64
+
+	err := db.conn.QueryRow(query, fmt.Sprintf("%d", days)).Scan(
+		&stats.TotalJobs, &stats.Successful, &stats.Failed, &stats.Running, &avgDuration,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return &JobStats{}, nil
+		}
+		return nil, err
+	}
+
+	if avgDuration.Valid {
+		stats.AvgDurationMs = avgDuration.Float64
+	}
+
+	if stats.TotalJobs > 0 {
+		stats.SuccessRate = float64(stats.Successful) / float64(stats.TotalJobs) * 100
+	}
+
+	return &stats, nil
+}
+
 // GetJobStats returns aggregated statistics
 func (db *Database) GetJobStats(workspaceID string, from, to time.Time) (*JobStats, error) {
 	query := `
@@ -374,7 +411,7 @@ func (db *Database) GetDailyStats(days int) ([]DailyStats, error) {
 		FROM job_instances
 		WHERE start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 		GROUP BY DATE_TRUNC('day', start_time)::DATE
-		ORDER BY date DESC
+		ORDER BY date ASC
 	`
 
 	rows, err := db.conn.Query(query, fmt.Sprintf("%d", days))
@@ -499,8 +536,8 @@ func (db *Database) GetItemTypeStats(days int) ([]ItemTypeStats, error) {
 	return stats, rows.Err()
 }
 
-// GetRecentFailures returns the most recent job failures
-func (db *Database) GetRecentFailures(limit int) ([]RecentFailure, error) {
+// GetRecentFailures returns the most recent job failures within the specified days
+func (db *Database) GetRecentFailures(limit int, days int) ([]RecentFailure, error) {
 	query := `
 		SELECT
 			j.id, j.workspace_id, w.display_name as workspace_name,
@@ -509,12 +546,14 @@ func (db *Database) GetRecentFailures(limit int) ([]RecentFailure, error) {
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
-		WHERE j.status = 'Failed' AND j.end_time IS NOT NULL
+		WHERE j.status = 'Failed' 
+			AND j.end_time IS NOT NULL
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 		ORDER BY j.start_time DESC
 		LIMIT ?
 	`
 
-	rows, err := db.conn.Query(query, limit)
+	rows, err := db.conn.Query(query, fmt.Sprintf("%d", days), limit)
 	if err != nil {
 		return nil, err
 	}
