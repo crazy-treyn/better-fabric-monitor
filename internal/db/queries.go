@@ -348,7 +348,7 @@ func (db *Database) GetDailyStats(days int) ([]DailyStats, error) {
 			SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
 			AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances
-		WHERE start_time >= CURRENT_DATE - INTERVAL (? || ' days')
+		WHERE start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 		GROUP BY DATE_TRUNC('day', start_time)::DATE
 		ORDER BY date DESC
 	`
@@ -395,7 +395,7 @@ func (db *Database) GetWorkspaceStats(days int) ([]WorkspaceStats, error) {
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
-		WHERE j.start_time >= CURRENT_DATE - INTERVAL (? || ' days')
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 		GROUP BY j.workspace_id, w.display_name
 		ORDER BY total_jobs DESC
 	`
@@ -441,7 +441,7 @@ func (db *Database) GetItemTypeStats(days int) ([]ItemTypeStats, error) {
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
-		WHERE j.start_time >= CURRENT_DATE - INTERVAL (? || ' days')
+		WHERE j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 		GROUP BY i.type
 		ORDER BY total_jobs DESC
 	`
@@ -537,7 +537,7 @@ func (db *Database) GetLongRunningJobs(days int, minDeviationPct float64, limit 
 			FROM job_instances
 			WHERE status = 'Completed'
 				AND duration_ms IS NOT NULL
-				AND start_time >= CURRENT_DATE - INTERVAL (? || ' days')
+				AND start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 			GROUP BY item_id
 			HAVING COUNT(*) >= 3
 		)
@@ -553,7 +553,7 @@ func (db *Database) GetLongRunningJobs(days int, minDeviationPct float64, limit 
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
 		WHERE j.status = 'Completed'
 			AND j.duration_ms IS NOT NULL
-			AND j.start_time >= CURRENT_DATE - INTERVAL (? || ' days')
+			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
 			AND ((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) > ?
 		ORDER BY deviation_pct DESC
 		LIMIT ?
