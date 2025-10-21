@@ -87,3 +87,67 @@ type JobStats struct {
 	SuccessRate   float64 `json:"successRate"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }
+
+// DailyStats represents job statistics aggregated by day
+type DailyStats struct {
+	Date          string  `json:"date"`
+	TotalJobs     int     `json:"totalJobs"`
+	Successful    int     `json:"successful"`
+	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
+	SuccessRate   float64 `json:"successRate"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
+}
+
+// WorkspaceStats represents job statistics by workspace
+type WorkspaceStats struct {
+	WorkspaceID   string  `json:"workspaceId"`
+	WorkspaceName string  `json:"workspaceName"`
+	TotalJobs     int     `json:"totalJobs"`
+	Successful    int     `json:"successful"`
+	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
+	SuccessRate   float64 `json:"successRate"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
+}
+
+// ItemTypeStats represents job statistics by item type
+type ItemTypeStats struct {
+	ItemType      string  `json:"itemType"`
+	TotalJobs     int     `json:"totalJobs"`
+	Successful    int     `json:"successful"`
+	Failed        int     `json:"failed"`
+	Running       int     `json:"running"`
+	SuccessRate   float64 `json:"successRate"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
+}
+
+// RecentFailures represents recent failed jobs
+type RecentFailure struct {
+	ID              string    `json:"id"`
+	WorkspaceID     string    `json:"workspaceId"`
+	WorkspaceName   string    `json:"workspaceName"`
+	ItemID          string    `json:"itemId"`
+	ItemDisplayName string    `json:"itemDisplayName"`
+	ItemType        string    `json:"itemType"`
+	JobType         string    `json:"jobType"`
+	StartTime       time.Time `json:"startTime"`
+	EndTime         time.Time `json:"endTime"`
+	DurationMs      int64     `json:"durationMs"`
+	FailureReason   string    `json:"failureReason"`
+}
+
+// LongRunningJob represents jobs with unusually long durations
+type LongRunningJob struct {
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspaceId"`
+	WorkspaceName   string  `json:"workspaceName"`
+	ItemID          string  `json:"itemId"`
+	ItemDisplayName string  `json:"itemDisplayName"`
+	ItemType        string  `json:"itemType"`
+	JobType         string  `json:"jobType"`
+	StartTime       time.Time `json:"startTime"`
+	DurationMs      int64   `json:"durationMs"`
+	AvgDurationMs   float64 `json:"avgDurationMs"`
+	DeviationPct    float64 `json:"deviationPct"`
+}

@@ -1,12 +1,14 @@
 <script>
     import { onMount } from "svelte";
     import { authStore, authActions } from "../stores/auth.js";
+    import Analytics from "./Analytics.svelte";
 
     let workspaces = [];
     let jobs = [];
     let isLoading = true;
     let sidebarWidth = 256; // Default width in pixels (w-64 = 16rem = 256px)
     let isResizing = false;
+    let currentView = "jobs"; // 'jobs' or 'analytics'
 
     // Filter states
     let filterJob = "";
@@ -75,6 +77,30 @@
     function formatDate(dateString) {
         if (!dateString) return "N/A";
         return new Date(dateString).toLocaleString();
+    }
+
+    function formatDuration(durationMs) {
+        if (!durationMs || durationMs < 0) return "N/A";
+
+        const seconds = Math.floor(durationMs / 1000);
+
+        if (seconds < 60) {
+            return `${seconds}s`;
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) {
+            const remainingSeconds = seconds % 60;
+            return remainingSeconds === 0
+                ? `${minutes}m`
+                : `${minutes}m ${remainingSeconds}s`;
+        }
+
+        const hours = Math.floor(minutes / 60);
+        const remainingMinutes = minutes % 60;
+        return remainingMinutes === 0
+            ? `${hours}h`
+            : `${hours}h ${remainingMinutes}m`;
     }
 
     function getStatusColor(status) {
@@ -148,9 +174,29 @@
                 <span class="text-sm text-slate-400"
                     >Tenant: {$authStore.tenantId}</span
                 >
+                <div class="flex gap-2 ml-6">
+                    <button
+                        on:click={() => (currentView = "jobs")}
+                        class="px-4 py-2 text-sm rounded-md transition-colors {currentView ===
+                        'jobs'
+                            ? 'bg-primary-600 text-white'
+                            : 'text-slate-300 hover:text-white hover:bg-slate-700'}"
+                    >
+                        Jobs
+                    </button>
+                    <button
+                        on:click={() => (currentView = "analytics")}
+                        class="px-4 py-2 text-sm rounded-md transition-colors {currentView ===
+                        'analytics'
+                            ? 'bg-primary-600 text-white'
+                            : 'text-slate-300 hover:text-white hover:bg-slate-700'}"
+                    >
+                        Analytics
+                    </button>
+                </div>
             </div>
             <div class="flex items-center gap-3">
-                {#if hasLoadedData}
+                {#if hasLoadedData && currentView === "jobs"}
                     <div class="text-sm text-slate-400">
                         {#if lastSyncTime}
                             Last synced: {new Date(
@@ -178,7 +224,9 @@
 
     <!-- Main Content -->
     <main class="flex-1 overflow-hidden">
-        {#if !hasLoadedData && !isLoading}
+        {#if currentView === "analytics"}
+            <Analytics />
+        {:else if !hasLoadedData && !isLoading}
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">
                     <svg
@@ -401,9 +449,7 @@
                                                 <td
                                                     class="px-4 py-3 text-sm text-slate-300"
                                                 >
-                                                    {job.durationMs
-                                                        ? `${Math.round(job.durationMs / 1000)}s`
-                                                        : "N/A"}
+                                                    {formatDuration(job.durationMs)}
                                                 </td>
                                             </tr>
                                         {/each}

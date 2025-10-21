@@ -6,6 +6,10 @@ export function CompleteLogin() {
   return window['go']['main']['App']['CompleteLogin']();
 }
 
+export function GetAnalytics(arg1) {
+  return window['go']['main']['App']['GetAnalytics'](arg1);
+}
+
 export function GetJobs() {
   return window['go']['main']['App']['GetJobs']();
 }

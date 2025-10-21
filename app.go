@@ -664,6 +664,121 @@ func (a *App) GetLastSyncTime() string {
 	return lastSync.Format(time.RFC3339)
 }
 
+// GetAnalytics returns comprehensive analytics data for the dashboard
+func (a *App) GetAnalytics(days int) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if days <= 0 {
+		days = 7 // Default to 7 days
+	}
+
+	result := make(map[string]interface{})
+
+	// Get daily stats
+	dailyStats, err := a.db.GetDailyStats(days)
+	if err != nil {
+		fmt.Printf("Failed to get daily stats: %v\n", err)
+		result["dailyStatsError"] = err.Error()
+	} else {
+		result["dailyStats"] = dailyStats
+	}
+
+	// Get workspace stats
+	workspaceStats, err := a.db.GetWorkspaceStats(days)
+	if err != nil {
+		fmt.Printf("Failed to get workspace stats: %v\n", err)
+		result["workspaceStatsError"] = err.Error()
+	} else {
+		result["workspaceStats"] = workspaceStats
+	}
+
+	// Get item type stats
+	itemTypeStats, err := a.db.GetItemTypeStats(days)
+	if err != nil {
+		fmt.Printf("Failed to get item type stats: %v\n", err)
+		result["itemTypeStatsError"] = err.Error()
+	} else {
+		result["itemTypeStats"] = itemTypeStats
+	}
+
+	// Get recent failures (last 10)
+	recentFailures, err := a.db.GetRecentFailures(10)
+	if err != nil {
+		fmt.Printf("Failed to get recent failures: %v\n", err)
+		result["recentFailuresError"] = err.Error()
+	} else {
+		result["recentFailures"] = recentFailures
+	}
+
+	// Get long-running jobs (50% or more above average, last 10)
+	longRunningJobs, err := a.db.GetLongRunningJobs(days, 50.0, 10)
+	if err != nil {
+		fmt.Printf("Failed to get long-running jobs: %v\n", err)
+		result["longRunningJobsError"] = err.Error()
+	} else {
+		result["longRunningJobs"] = longRunningJobs
+	}
+
+	// Calculate overall stats for the period
+	filter := db.JobFilter{}
+	from := time.Now().AddDate(0, 0, -days)
+	filter.StartDateFrom = &from
+
+	allJobs, err := a.db.GetJobInstances(filter)
+	if err != nil {
+		fmt.Printf("Failed to get jobs for overall stats: %v\n", err)
+	} else {
+		totalJobs := len(allJobs)
+		successful := 0
+		failed := 0
+		running := 0
+		var totalDuration int64 = 0
+		completedCount := 0
+
+		for _, job := range allJobs {
+			switch job.Status {
+			case "Completed":
+				successful++
+				if job.DurationMs != nil {
+					totalDuration += *job.DurationMs
+					completedCount++
+				}
+			case "Failed":
+				failed++
+			case "InProgress", "Running", "NotStarted":
+				running++
+			}
+		}
+
+		avgDuration := float64(0)
+		if completedCount > 0 {
+			avgDuration = float64(totalDuration) / float64(completedCount)
+		}
+
+		successRate := float64(0)
+		if totalJobs > 0 {
+			successRate = float64(successful) / float64(totalJobs) * 100
+		}
+
+		result["overallStats"] = map[string]interface{}{
+			"totalJobs":     totalJobs,
+			"successful":    successful,
+			"failed":        failed,
+			"running":       running,
+			"successRate":   successRate,
+			"avgDurationMs": avgDuration,
+		}
+	}
+
+	result["days"] = days
+
+	return result
+}
+
 // Greet returns a greeting for the given name (legacy method)
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)

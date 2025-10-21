@@ -3,6 +3,8 @@
 
 export function CompleteLogin():Promise<Record<string, any>>;
 
+export function GetAnalytics(arg1:number):Promise<Record<string, any>>;
+
 export function GetJobs():Promise<Array<Record<string, any>>>;
 
 export function GetJobsFromCache():Promise<Array<Record<string, any>>>;
