@@ -1,5 +1,6 @@
 <script>
     import { onMount, afterUpdate } from "svelte";
+    import { filterStore } from "../stores/filters.js";
     import Chart from "chart.js/auto";
 
     let analytics = null;
@@ -15,6 +16,28 @@
     let selectedWorkspace = null;
     let selectedJobType = null;
     let drillDownData = null;
+
+    // Filter states
+    let selectedWorkspaceIds = new Set();
+    let selectedItemTypes = new Set();
+    let itemNameSearch = "";
+    let availableItemTypes = [];
+    let allWorkspaces = [];
+    let workspaceSearchText = "";
+    let itemTypeSearchText = "";
+    let showWorkspaceDropdown = false;
+    let showItemTypeDropdown = false;
+    let isInitialized = false;
+
+    // Subscribe to filter store for workspace selection sync
+    filterStore.subscribe((state) => {
+        selectedWorkspaceIds = state.selectedWorkspaceIds;
+        // Only auto-refresh after initial load is complete
+        if (isInitialized && analytics !== null) {
+            loadAvailableItemTypes();
+            loadAnalytics();
+        }
+    });
 
     onMount(async () => {
         await loadAnalytics();
@@ -385,14 +408,55 @@
     }
 
     onMount(async () => {
+        await loadWorkspacesAndItemTypes();
         await loadAnalytics();
+        isInitialized = true;
     });
+
+    async function loadWorkspacesAndItemTypes() {
+        try {
+            // Load all workspaces for the filter dropdown
+            allWorkspaces =
+                (await window.go.main.App.GetWorkspacesFromCache()) || [];
+
+            // Load available item types based on current filters
+            await loadAvailableItemTypes();
+        } catch (err) {
+            console.error("Failed to load filter data:", err);
+        }
+    }
+
+    async function loadAvailableItemTypes() {
+        try {
+            const workspaceIDsArray = Array.from(selectedWorkspaceIds);
+            availableItemTypes =
+                (await window.go.main.App.GetAvailableItemTypes(
+                    selectedDays,
+                    workspaceIDsArray,
+                )) || [];
+        } catch (err) {
+            console.error("Failed to load item types:", err);
+            availableItemTypes = [];
+        }
+    }
 
     async function loadAnalytics() {
         try {
             isLoading = true;
             error = null;
-            analytics = await window.go.main.App.GetAnalytics(selectedDays);
+
+            // Convert Sets to arrays for Go
+            const workspaceIDsArray = Array.from(selectedWorkspaceIds);
+            const itemTypesArray = Array.from(selectedItemTypes);
+
+            // Use filtered analytics method
+            analytics = await window.go.main.App.GetAnalyticsFiltered(
+                selectedDays,
+                workspaceIDsArray,
+                itemTypesArray,
+                itemNameSearch,
+            );
+
             console.log("Analytics loaded:", analytics);
 
             // Log individual sections for debugging
@@ -431,6 +495,53 @@
             isLoading = false;
         }
     }
+
+    // Filter control functions
+    function toggleWorkspaceFilter(workspaceId) {
+        filterStore.toggleWorkspace(workspaceId);
+        // Workspace filter change handled by store subscription which calls loadAnalytics
+    }
+
+    function toggleItemTypeFilter(itemType) {
+        selectedItemTypes = new Set(selectedItemTypes);
+        if (selectedItemTypes.has(itemType)) {
+            selectedItemTypes.delete(itemType);
+        } else {
+            selectedItemTypes.add(itemType);
+        }
+        // Manually trigger analytics reload
+        loadAnalytics();
+    }
+
+    function clearAllFilters() {
+        filterStore.clearWorkspaces();
+        selectedItemTypes = new Set();
+        itemNameSearch = "";
+        // loadAnalytics will be called by store subscription
+    }
+
+    function handleItemNameSearchChange() {
+        // Manually trigger analytics reload
+        loadAnalytics();
+    }
+
+    // Computed filtered workspaces for dropdown
+    $: filteredWorkspacesForDropdown = allWorkspaces.filter((ws) =>
+        (ws.displayName || ws.id)
+            .toLowerCase()
+            .includes(workspaceSearchText.toLowerCase()),
+    );
+
+    // Computed filtered item types for dropdown
+    $: filteredItemTypesForDropdown = availableItemTypes.filter((type) =>
+        type.toLowerCase().includes(itemTypeSearchText.toLowerCase()),
+    );
+
+    // Count active filters
+    $: activeFilterCount =
+        selectedWorkspaceIds.size +
+        selectedItemTypes.size +
+        (itemNameSearch ? 1 : 0);
 
     async function handleWorkspaceDrillDown(workspaceId, workspaceName) {
         try {
@@ -517,6 +628,17 @@
         return `${value.toFixed(1)}%`;
     }
 
+    // Close dropdowns when clicking outside
+    function handleClickOutside(event) {
+        const target = event.target;
+        if (!target.closest(".workspace-dropdown-container")) {
+            showWorkspaceDropdown = false;
+        }
+        if (!target.closest(".itemtype-dropdown-container")) {
+            showItemTypeDropdown = false;
+        }
+    }
+
     $: hasData =
         analytics &&
         !error &&
@@ -524,30 +646,194 @@
             analytics.dailyStats?.length > 0);
 </script>
 
+<svelte:window on:click={handleClickOutside} />
+
 <div class="h-full overflow-auto bg-slate-900 p-6">
-    <!-- Header -->
-    <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-3xl font-bold text-white">Analytics Dashboard</h1>
+    <!-- Header with Filters -->
+    <div class="mb-6">
+        <div class="mb-4 flex items-center justify-between">
+            <h1 class="text-3xl font-bold text-white">Analytics Dashboard</h1>
+            <div class="flex items-center gap-3">
+                <label class="text-sm text-slate-300">Time Period:</label>
+                <select
+                    bind:value={selectedDays}
+                    on:change={loadAnalytics}
+                    class="rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                    <option value={1}>Last 24 Hours</option>
+                    <option value={7}>Last 7 Days</option>
+                    <option value={14}>Last 14 Days</option>
+                    <option value={30}>Last 30 Days</option>
+                    <option value={90}>Last 90 Days</option>
+                </select>
+                <button
+                    on:click={loadAnalytics}
+                    disabled={isLoading}
+                    class="rounded-md bg-primary-600 px-4 py-2 text-sm text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
+                >
+                    {isLoading ? "Loading..." : "Refresh"}
+                </button>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
         <div class="flex items-center gap-3">
-            <label class="text-sm text-slate-300">Time Period:</label>
-            <select
-                bind:value={selectedDays}
-                on:change={loadAnalytics}
-                class="rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-            >
-                <option value={1}>Last 24 Hours</option>
-                <option value={7}>Last 7 Days</option>
-                <option value={14}>Last 14 Days</option>
-                <option value={30}>Last 30 Days</option>
-                <option value={90}>Last 90 Days</option>
-            </select>
-            <button
-                on:click={loadAnalytics}
-                disabled={isLoading}
-                class="rounded-md bg-primary-600 px-4 py-2 text-sm text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
-            >
-                {isLoading ? "Loading..." : "Refresh"}
-            </button>
+            <div class="flex flex-1 gap-3">
+                <!-- Workspace Filter -->
+                <div class="relative workspace-dropdown-container flex-1">
+                    <div class="relative">
+                        <button
+                            on:click={() =>
+                                (showWorkspaceDropdown =
+                                    !showWorkspaceDropdown)}
+                            class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                            <span class="mr-2 text-xs text-slate-400"
+                                >Workspaces:</span
+                            >
+                            {#if selectedWorkspaceIds.size === 0}
+                                All Workspaces
+                            {:else if selectedWorkspaceIds.size === 1}
+                                {allWorkspaces.find((ws) =>
+                                    selectedWorkspaceIds.has(ws.id),
+                                )?.displayName ||
+                                    allWorkspaces.find((ws) =>
+                                        selectedWorkspaceIds.has(ws.id),
+                                    )?.id ||
+                                    "1 selected"}
+                            {:else}
+                                {selectedWorkspaceIds.size} selected
+                            {/if}
+                            <span class="float-right">▼</span>
+                        </button>
+
+                        {#if showWorkspaceDropdown}
+                            <div
+                                class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
+                            >
+                                <div class="p-2">
+                                    <input
+                                        type="text"
+                                        bind:value={workspaceSearchText}
+                                        placeholder="Search workspaces..."
+                                        class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                </div>
+                                <div class="max-h-60 overflow-y-auto p-2">
+                                    {#each filteredWorkspacesForDropdown as workspace}
+                                        <label
+                                            class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedWorkspaceIds.has(
+                                                    workspace.id,
+                                                )}
+                                                on:change={() =>
+                                                    toggleWorkspaceFilter(
+                                                        workspace.id,
+                                                    )}
+                                                class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
+                                            />
+                                            <span class="text-sm text-white">
+                                                {workspace.displayName ||
+                                                    workspace.id}
+                                            </span>
+                                        </label>
+                                    {/each}
+                                    {#if filteredWorkspacesForDropdown.length === 0}
+                                        <p class="p-2 text-sm text-slate-400">
+                                            No matching workspaces
+                                        </p>
+                                    {/if}
+                                </div>
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+
+                <!-- Item Type Filter -->
+                <div class="relative itemtype-dropdown-container flex-1">
+                    <div class="relative">
+                        <button
+                            on:click={() =>
+                                (showItemTypeDropdown = !showItemTypeDropdown)}
+                            class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-left text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                            <span class="mr-2 text-xs text-slate-400"
+                                >Item Types:</span
+                            >
+                            {#if selectedItemTypes.size === 0}
+                                All Types
+                            {:else if selectedItemTypes.size === 1}
+                                {Array.from(selectedItemTypes)[0]}
+                            {:else}
+                                {selectedItemTypes.size} selected
+                            {/if}
+                            <span class="float-right">▼</span>
+                        </button>
+
+                        {#if showItemTypeDropdown}
+                            <div
+                                class="absolute z-10 mt-1 w-full rounded-md border border-slate-600 bg-slate-700 shadow-lg"
+                            >
+                                <div class="p-2">
+                                    <input
+                                        type="text"
+                                        bind:value={itemTypeSearchText}
+                                        placeholder="Search types..."
+                                        class="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                </div>
+                                <div class="max-h-60 overflow-y-auto p-2">
+                                    {#each filteredItemTypesForDropdown as itemType}
+                                        <label
+                                            class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-600"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedItemTypes.has(
+                                                    itemType,
+                                                )}
+                                                on:change={() =>
+                                                    toggleItemTypeFilter(
+                                                        itemType,
+                                                    )}
+                                                class="h-4 w-4 rounded border-slate-500 bg-slate-600 text-primary-600"
+                                            />
+                                            <span class="text-sm text-white">
+                                                {itemType}
+                                            </span>
+                                        </label>
+                                    {/each}
+                                    {#if filteredItemTypesForDropdown.length === 0}
+                                        <p class="p-2 text-sm text-slate-400">
+                                            No matching types
+                                        </p>
+                                    {/if}
+                                </div>
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+
+                <!-- Item Name Search -->
+                <div class="flex-1">
+                    <input
+                        type="text"
+                        bind:value={itemNameSearch}
+                        on:input={handleItemNameSearchChange}
+                        placeholder="Search by item name..."
+                        class="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                </div>
+                <button
+                    on:click={clearAllFilters}
+                    class="rounded-md border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-600 hover:text-white transition-colors"
+                >
+                    Clear All
+                </button>
+            </div>
         </div>
     </div>
 
