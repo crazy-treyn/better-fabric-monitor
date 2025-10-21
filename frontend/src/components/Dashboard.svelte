@@ -449,7 +449,9 @@
                                                 <td
                                                     class="px-4 py-3 text-sm text-slate-300"
                                                 >
-                                                    {formatDuration(job.durationMs)}
+                                                    {formatDuration(
+                                                        job.durationMs,
+                                                    )}
                                                 </td>
                                             </tr>
                                         {/each}

@@ -139,15 +139,15 @@ type RecentFailure struct {
 
 // LongRunningJob represents jobs with unusually long durations
 type LongRunningJob struct {
-	ID              string  `json:"id"`
-	WorkspaceID     string  `json:"workspaceId"`
-	WorkspaceName   string  `json:"workspaceName"`
-	ItemID          string  `json:"itemId"`
-	ItemDisplayName string  `json:"itemDisplayName"`
-	ItemType        string  `json:"itemType"`
-	JobType         string  `json:"jobType"`
+	ID              string    `json:"id"`
+	WorkspaceID     string    `json:"workspaceId"`
+	WorkspaceName   string    `json:"workspaceName"`
+	ItemID          string    `json:"itemId"`
+	ItemDisplayName string    `json:"itemDisplayName"`
+	ItemType        string    `json:"itemType"`
+	JobType         string    `json:"jobType"`
 	StartTime       time.Time `json:"startTime"`
-	DurationMs      int64   `json:"durationMs"`
-	AvgDurationMs   float64 `json:"avgDurationMs"`
-	DeviationPct    float64 `json:"deviationPct"`
+	DurationMs      int64     `json:"durationMs"`
+	AvgDurationMs   float64   `json:"avgDurationMs"`
+	DeviationPct    float64   `json:"deviationPct"`
 }

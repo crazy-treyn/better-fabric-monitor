@@ -107,7 +107,9 @@
             </div>
         </div>
     {:else if error}
-        <div class="rounded-lg bg-red-900/20 border border-red-700 p-6 text-center">
+        <div
+            class="rounded-lg bg-red-900/20 border border-red-700 p-6 text-center"
+        >
             <svg
                 class="mx-auto h-12 w-12 text-red-400 mb-4"
                 fill="none"
@@ -121,7 +123,9 @@
                     d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
             </svg>
-            <h3 class="text-lg font-medium text-red-400 mb-2">Error Loading Analytics</h3>
+            <h3 class="text-lg font-medium text-red-400 mb-2">
+                Error Loading Analytics
+            </h3>
             <p class="text-slate-300">{error}</p>
         </div>
     {:else if !hasData}
@@ -139,9 +143,12 @@
                     d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                 />
             </svg>
-            <h3 class="text-xl font-medium text-white mb-2">No Data Available</h3>
+            <h3 class="text-xl font-medium text-white mb-2">
+                No Data Available
+            </h3>
             <p class="text-slate-400">
-                No job data found for the selected time period. Try fetching data from the API first.
+                No job data found for the selected time period. Try fetching
+                data from the API first.
             </p>
         </div>
     {:else}
@@ -182,7 +189,9 @@
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <!-- Daily Trend -->
             <div class="rounded-lg bg-slate-800 p-6 border border-slate-700">
-                <h2 class="mb-4 text-xl font-semibold text-white">Daily Trend</h2>
+                <h2 class="mb-4 text-xl font-semibold text-white">
+                    Daily Trend
+                </h2>
                 {#if analytics.dailyStats && analytics.dailyStats.length > 0}
                     <div class="space-y-2">
                         {#each analytics.dailyStats as stat}
@@ -193,7 +202,9 @@
                                     <div class="text-sm font-medium text-white">
                                         {formatDate(stat.date)}
                                     </div>
-                                    <div class="mt-1 flex items-center gap-3 text-xs">
+                                    <div
+                                        class="mt-1 flex items-center gap-3 text-xs"
+                                    >
                                         <span class="text-green-400"
                                             >{stat.successful} ✓</span
                                         >
@@ -235,10 +246,15 @@
                                 class="flex items-center justify-between rounded-md bg-slate-700/50 p-3"
                             >
                                 <div class="flex-1">
-                                    <div class="text-sm font-medium text-white truncate" title={stat.workspaceName}>
+                                    <div
+                                        class="text-sm font-medium text-white truncate"
+                                        title={stat.workspaceName}
+                                    >
                                         {stat.workspaceName || stat.workspaceId}
                                     </div>
-                                    <div class="mt-1 flex items-center gap-3 text-xs">
+                                    <div
+                                        class="mt-1 flex items-center gap-3 text-xs"
+                                    >
                                         <span class="text-slate-300"
                                             >{stat.totalJobs} total</span
                                         >
@@ -281,7 +297,9 @@
                                     <div class="text-sm font-medium text-white">
                                         {stat.itemType || "Unknown"}
                                     </div>
-                                    <div class="mt-1 flex items-center gap-3 text-xs">
+                                    <div
+                                        class="mt-1 flex items-center gap-3 text-xs"
+                                    >
                                         <span class="text-slate-300"
                                             >{stat.totalJobs} jobs</span
                                         >
@@ -317,15 +335,28 @@
                 {#if analytics.recentFailures && analytics.recentFailures.length > 0}
                     <div class="space-y-2 max-h-96 overflow-y-auto">
                         {#each analytics.recentFailures as failure}
-                            <div class="rounded-md bg-red-900/20 p-3 border border-red-800/30">
-                                <div class="text-sm font-medium text-white truncate" title={failure.itemDisplayName}>
+                            <div
+                                class="rounded-md bg-red-900/20 p-3 border border-red-800/30"
+                            >
+                                <div
+                                    class="text-sm font-medium text-white truncate"
+                                    title={failure.itemDisplayName}
+                                >
                                     {failure.itemDisplayName || failure.itemId}
                                 </div>
-                                <div class="mt-1 text-xs text-slate-400 truncate" title={failure.workspaceName}>
-                                    {failure.workspaceName || failure.workspaceId}
+                                <div
+                                    class="mt-1 text-xs text-slate-400 truncate"
+                                    title={failure.workspaceName}
+                                >
+                                    {failure.workspaceName ||
+                                        failure.workspaceId}
                                 </div>
-                                <div class="mt-1 text-xs text-red-300 truncate" title={failure.failureReason}>
-                                    {failure.failureReason || "No reason provided"}
+                                <div
+                                    class="mt-1 text-xs text-red-300 truncate"
+                                    title={failure.failureReason}
+                                >
+                                    {failure.failureReason ||
+                                        "No reason provided"}
                                 </div>
                                 <div class="mt-1 text-xs text-slate-500">
                                     {formatDateTime(failure.startTime)}
@@ -356,7 +387,9 @@
 
         <!-- Long Running Jobs -->
         {#if analytics.longRunningJobs && analytics.longRunningJobs.length > 0}
-            <div class="mt-6 rounded-lg bg-slate-800 p-6 border border-yellow-700/30">
+            <div
+                class="mt-6 rounded-lg bg-slate-800 p-6 border border-yellow-700/30"
+            >
                 <h2 class="mb-4 text-xl font-semibold text-yellow-400">
                     Long Running Jobs (50%+ above average)
                 </h2>
@@ -394,14 +427,20 @@
                             {#each analytics.longRunningJobs as job}
                                 <tr class="hover:bg-slate-700/50">
                                     <td class="px-4 py-3">
-                                        <div class="text-sm text-white truncate" title={job.itemDisplayName}>
+                                        <div
+                                            class="text-sm text-white truncate"
+                                            title={job.itemDisplayName}
+                                        >
                                             {job.itemDisplayName || job.itemId}
                                         </div>
                                         <div class="text-xs text-slate-400">
                                             {job.itemType || "N/A"}
                                         </div>
                                     </td>
-                                    <td class="px-4 py-3 text-sm text-slate-300 truncate" title={job.workspaceName}>
+                                    <td
+                                        class="px-4 py-3 text-sm text-slate-300 truncate"
+                                        title={job.workspaceName}
+                                    >
                                         {job.workspaceName || job.workspaceId}
                                     </td>
                                     <td
@@ -409,7 +448,9 @@
                                     >
                                         {formatDuration(job.durationMs)}
                                     </td>
-                                    <td class="px-4 py-3 text-sm text-slate-400">
+                                    <td
+                                        class="px-4 py-3 text-sm text-slate-400"
+                                    >
                                         {formatDuration(job.avgDurationMs)}
                                     </td>
                                     <td
@@ -417,7 +458,9 @@
                                     >
                                         +{job.deviationPct.toFixed(0)}%
                                     </td>
-                                    <td class="px-4 py-3 text-sm text-slate-400">
+                                    <td
+                                        class="px-4 py-3 text-sm text-slate-400"
+                                    >
                                         {formatDateTime(job.startTime)}
                                     </td>
                                 </tr>
