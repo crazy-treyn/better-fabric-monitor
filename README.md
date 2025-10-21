@@ -1,83 +1,102 @@
-# README
+# Better Fabric Monitor
 
-## About
+A desktop application for monitoring Microsoft Fabric job executions, built with Wails (Go + Svelte) and DuckDB for local analytics.
 
-This is the official Wails Svelte template.
+## Features
 
-## Live Development
+- 🔐 **Azure AD Authentication** - Secure device code flow authentication
+- 📊 **Job Monitoring** - Track pipeline, notebook, and other Fabric job executions
+- 💾 **Local Caching** - DuckDB-powered local database for offline access
+- 📈 **Analytics Dashboard** - Success/failure rates, recent failures, and anomaly detection
+- 🔄 **Incremental Sync** - Efficient API usage with smart caching
+- 🎨 **Modern UI** - Dark-themed interface built with Tailwind CSS
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+## Prerequisites
 
-## Building
+- **Go 1.20+** - [Download](https://go.dev/dl/)
+- **Node.js 16+** - [Download](https://nodejs.org/)
+- **Wails CLI** - `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- **WebView2 Runtime** - Pre-installed on Windows 10/11
+- **GCC Compiler** - [TDM-GCC](https://jmeubank.github.io/tdm-gcc/) or [MinGW-w64](https://www.mingw-w64.org/)
 
-To build a redistributable, production mode package, use `wails build`.
+## Quick Start
 
-## Database Location
-
-The application stores data in a DuckDB database file located at:
-- **Default path**: `data/fabric-monitor.db` (relative to the application's working directory)
-- When running `wails dev`: Located in the project root directory at `data/fabric-monitor.db`
-- When running the built .exe: Located relative to where the executable runs
-
-### Finding Your Database
-
-Check the console output when the app starts - it will print:
-```
-Initializing DuckDB database at: <absolute-path>
-```
-
-**Important**: If no database path is configured, DuckDB defaults to an **in-memory database** that is lost when the app closes! The app now validates this and ensures a file-based database is always used.
-
-### Inspecting the Database
-
-You can manually inspect the database using:
-1. **DuckDB CLI**: Download from [duckdb.org](https://duckdb.org/docs/installation/)
+1. **Clone and install dependencies**
    ```powershell
-   duckdb data\fabric-monitor.db
+   git clone https://github.com/crazy-treyn/better-fabric-monitor.git
+   cd better-fabric-monitor
+   go mod tidy
+   cd frontend; npm install; cd ..
    ```
 
-The database contains:
-- `workspaces` - Fabric workspace information
-- `items` - Pipelines, notebooks, and other Fabric items  
-- `job_instances` - Job execution history
-- `pipeline_runs` - Pipeline run details
-- `sync_metadata` - Synchronization tracking
+2. **Run in development mode**
+   ```powershell
+   wails dev
+   ```
 
-### Configuring the Database Location
+3. **Build for production**
+   ```powershell
+   wails build
+   .\build\bin\better-fabric-monitor.exe
+   ```
 
-To change the database location, set the environment variable:
+## Usage
+
+1. **Authenticate** - Enter your Azure Tenant ID and follow the device code flow
+2. **Load Data** - Click "Load Data from API" to fetch workspaces and jobs
+3. **View Analytics** - Switch to the Analytics tab for insights and metrics
+
+## Database
+
+The application uses DuckDB to store workspace, item, and job instance data locally at `data/fabric-monitor.db`.
+
+**Inspect with DuckDB CLI:**
+```powershell
+duckdb data\fabric-monitor.db
+SELECT * FROM workspaces;
+SELECT * FROM job_instances WHERE status = 'Failed' ORDER BY start_time DESC LIMIT 10;
+```
+
+**Configure location** (optional):
 ```powershell
 $env:FABRIC_MONITOR_DATABASE_PATH = "C:\path\to\your\database.db"
 ```
 
-Or create a `.env` file in the project root:
+## Project Structure
+
 ```
-FABRIC_MONITOR_DATABASE_PATH=C:\path\to\your\database.db
+better-fabric-monitor/
+├── app.go                      # Main app logic and Wails bindings
+├── main.go                     # Application entry point
+├── internal/
+│   ├── auth/                   # Azure AD authentication
+│   ├── config/                 # Configuration management
+│   ├── db/                     # DuckDB database layer
+│   ├── fabric/                 # Microsoft Fabric API client
+│   └── utils/                  # Utility functions
+├── frontend/src/
+│   ├── components/             # Svelte components
+│   └── stores/                 # State management
+├── data/                       # Database storage
+└── build/                      # Build output
 ```
 
-## DuckDB Go Development Setup
+## Technology Stack
 
-This project uses [DuckDB Go v2](https://github.com/duckdb/duckdb-go) for local analytics and caching.
+- **Backend**: Go 1.20+ with Wails v2
+- **Frontend**: Svelte + Vite + Tailwind CSS
+- **Database**: DuckDB (embedded analytical database)
+- **Authentication**: Azure AD device code flow
+- **API**: Microsoft Fabric REST API
 
-### Prerequisites
-- Go 1.20 or newer
-- No native DuckDB install required (the Go driver bundles the engine)
+## Resources
 
-### Install/Update Dependencies
+- [Wails Documentation](https://wails.io/docs/introduction)
+- [DuckDB Documentation](https://duckdb.org/docs/)
+- [Microsoft Fabric API](https://learn.microsoft.com/en-us/rest/api/fabric/)
+- [Svelte Documentation](https://svelte.dev/docs)
 
-```powershell
-go mod tidy
-```
+## License
 
-### Troubleshooting
-- If you see errors about `CURRENT_TIMESTAMP`, make sure you are using DuckDB Go v2.5.0+ and the code uses `now()` instead.
-- If you see `no such column` or schema errors, delete your local DB file (check console output for the exact path, default: `data\fabric-monitor.db`) and restart the app to recreate it.
-- If you see `dll not found` or `libduckdb` errors, ensure you are using the official Go driver and not the old `marcboeker/go-duckdb` package.
-- If data doesn't persist between runs, check that you're not using an in-memory database - the console should show "Initializing DuckDB database at:" with a file path (not empty).
+See LICENSE file for details.
 
-### Useful Links
-- [DuckDB Go v2 Docs](https://github.com/duckdb/duckdb-go)
-- [DuckDB SQL Reference](https://duckdb.org/docs/sql/introduction.html)
