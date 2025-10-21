@@ -17,6 +17,18 @@ type Database struct {
 
 // NewDatabase creates or opens a DuckDB database file
 func NewDatabase(path string, encryptionKey string) (*Database, error) {
+	// Validate path - empty path creates in-memory database!
+	if path == "" {
+		return nil, fmt.Errorf("database path cannot be empty (empty path creates in-memory database)")
+	}
+
+	// Get absolute path for logging
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path // fallback to relative path
+	}
+	fmt.Printf("Initializing DuckDB database at: %s\n", absPath)
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {

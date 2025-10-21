@@ -35,13 +35,29 @@ func (a *App) startup(ctx context.Context) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Printf("Failed to load config: %v\n", err)
-		// Continue with default config
-		cfg = &config.Config{}
+		// Continue with default config but set essential defaults
+		cfg = &config.Config{
+			Database: config.DatabaseConfig{
+				Path:          "data/fabric-monitor.db",
+				RetentionDays: 90,
+			},
+			Auth: config.AuthConfig{
+				RedirectURI: "http://localhost:8400",
+			},
+			UI: config.UIConfig{
+				PrimaryColor: "#00BCF2",
+			},
+		}
 	}
 	a.config = cfg
 
-	// Initialize database
-	database, err := db.NewDatabase(cfg.Database.Path, cfg.Database.EncryptionKey)
+	// Initialize database with proper path validation
+	dbPath := cfg.Database.Path
+	if dbPath == "" {
+		dbPath = "data/fabric-monitor.db"
+		fmt.Printf("Warning: database path not set, using default: %s\n", dbPath)
+	}
+	database, err := db.NewDatabase(dbPath, cfg.Database.EncryptionKey)
 	if err != nil {
 		fmt.Printf("Failed to initialize database: %v\n", err)
 	} else {
