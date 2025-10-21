@@ -25,18 +25,21 @@ type Item struct {
 
 // JobInstance represents a job execution instance
 type JobInstance struct {
-	ID            string     `json:"id"`
-	WorkspaceID   string     `json:"workspaceId"`
-	ItemID        string     `json:"itemId"`
-	JobType       string     `json:"jobType"`
-	Status        string     `json:"status"`
-	StartTime     time.Time  `json:"startTime"`
-	EndTime       *time.Time `json:"endTime,omitempty"`
-	DurationMs    *int64     `json:"durationMs,omitempty"`
-	FailureReason *string    `json:"failureReason,omitempty"`
-	InvokerType   *string    `json:"invokerType,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID              string     `json:"id"`
+	WorkspaceID     string     `json:"workspaceId"`
+	ItemID          string     `json:"itemId"`
+	JobType         string     `json:"jobType"`
+	Status          string     `json:"status"`
+	StartTime       time.Time  `json:"startTime"`
+	EndTime         *time.Time `json:"endTime,omitempty"`
+	DurationMs      *int64     `json:"durationMs,omitempty"`
+	FailureReason   *string    `json:"failureReason,omitempty"`
+	InvokerType     *string    `json:"invokerType,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
+	ItemDisplayName *string    `json:"itemDisplayName,omitempty"` // Joined from items table
+	ItemType        *string    `json:"itemType,omitempty"`        // Joined from items table
+	WorkspaceName   *string    `json:"workspaceName,omitempty"`   // Joined from workspaces table
 }
 
 // PipelineRun represents a pipeline run

@@ -25,6 +25,15 @@
         try {
             isLoading = true;
             // Load from local cache (DuckDB)
+            const cachedWorkspaces =
+                (await window.go.main.App.GetWorkspacesFromCache()) || [];
+            if (cachedWorkspaces.length > 0) {
+                workspaces = cachedWorkspaces;
+                console.log(
+                    `Loaded ${cachedWorkspaces.length} workspaces from cache`,
+                );
+            }
+
             const cachedJobs =
                 (await window.go.main.App.GetJobsFromCache()) || [];
             if (cachedJobs.length > 0) {

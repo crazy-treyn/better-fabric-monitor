@@ -212,7 +212,16 @@ func (a *App) GetUserInfo() map[string]interface{} {
 // GetWorkspaces returns available workspaces
 func (a *App) GetWorkspaces() []map[string]interface{} {
 	if a.fabricClient == nil {
-		fmt.Println("Fabric client not initialized, returning mock data")
+		fmt.Println("Fabric client not initialized, checking cache...")
+		// Try to load from cache first
+		cachedWorkspaces := a.GetWorkspacesFromCache()
+		if len(cachedWorkspaces) > 0 {
+			fmt.Printf("Loaded %d workspaces from cache\n", len(cachedWorkspaces))
+			return cachedWorkspaces
+		}
+
+		// No cache, return mock data
+		fmt.Println("No cached workspaces, returning mock data")
 		return []map[string]interface{}{
 			{
 				"id":          "workspace-1",
@@ -230,7 +239,14 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 	// Get real workspaces from Fabric API
 	workspaces, err := a.fabricClient.GetWorkspaces(a.ctx)
 	if err != nil {
-		fmt.Printf("Failed to get workspaces: %v\n", err)
+		fmt.Printf("Failed to get workspaces from API: %v, checking cache...\n", err)
+		// Try cache as fallback
+		cachedWorkspaces := a.GetWorkspacesFromCache()
+		if len(cachedWorkspaces) > 0 {
+			fmt.Printf("Loaded %d workspaces from cache as fallback\n", len(cachedWorkspaces))
+			return cachedWorkspaces
+		}
+
 		return []map[string]interface{}{
 			{
 				"id":          "error",
@@ -501,6 +517,24 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 			"startTime":   job.StartTime.Format(time.RFC3339),
 		}
 
+		// Add item display name and type from the joined data
+		if job.ItemDisplayName != nil {
+			jobMap["itemDisplayName"] = *job.ItemDisplayName
+		} else {
+			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
+		}
+
+		if job.ItemType != nil {
+			jobMap["itemType"] = *job.ItemType
+		} else {
+			jobMap["itemType"] = job.JobType // Fallback to job type
+		}
+
+		// Add workspace name from the joined data
+		if job.WorkspaceName != nil {
+			jobMap["workspaceName"] = *job.WorkspaceName
+		}
+
 		if job.EndTime != nil {
 			jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
 		}
@@ -515,6 +549,39 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 	}
 
 	fmt.Printf("Loaded %d jobs from cache\n", len(result))
+	return result
+}
+
+// GetWorkspacesFromCache retrieves workspaces from the local DuckDB cache
+func (a *App) GetWorkspacesFromCache() []map[string]interface{} {
+	if a.db == nil {
+		return []map[string]interface{}{}
+	}
+
+	// Get all workspaces from database
+	workspaces, err := a.db.GetWorkspaces()
+	if err != nil {
+		fmt.Printf("Failed to get workspaces from cache: %v\n", err)
+		return []map[string]interface{}{}
+	}
+
+	// Convert to map format for frontend
+	result := make([]map[string]interface{}, 0, len(workspaces))
+	for _, ws := range workspaces {
+		wsMap := map[string]interface{}{
+			"id":          ws.ID,
+			"displayName": ws.DisplayName,
+			"type":        ws.Type,
+		}
+
+		if ws.Description != nil {
+			wsMap["description"] = *ws.Description
+		}
+
+		result = append(result, wsMap)
+	}
+
+	fmt.Printf("Loaded %d workspaces from cache\n", len(result))
 	return result
 }
 

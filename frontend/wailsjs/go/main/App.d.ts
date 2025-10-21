@@ -13,6 +13,8 @@ export function GetUserInfo():Promise<Record<string, any>>;
 
 export function GetWorkspaces():Promise<Array<Record<string, any>>>;
 
+export function GetWorkspacesFromCache():Promise<Array<Record<string, any>>>;
+
 export function Greet(arg1:string):Promise<string>;
 
 export function IsAuthenticated():Promise<boolean>;

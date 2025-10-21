@@ -26,6 +26,10 @@ export function GetWorkspaces() {
   return window['go']['main']['App']['GetWorkspaces']();
 }
 
+export function GetWorkspacesFromCache() {
+  return window['go']['main']['App']['GetWorkspacesFromCache']();
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }

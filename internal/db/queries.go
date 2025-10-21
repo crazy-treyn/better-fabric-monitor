@@ -138,32 +138,32 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	var args []interface{}
 
 	if filter.WorkspaceID != nil {
-		conditions = append(conditions, "workspace_id = ?")
+		conditions = append(conditions, "j.workspace_id = ?")
 		args = append(args, *filter.WorkspaceID)
 	}
 
 	if filter.ItemID != nil {
-		conditions = append(conditions, "item_id = ?")
+		conditions = append(conditions, "j.item_id = ?")
 		args = append(args, *filter.ItemID)
 	}
 
 	if filter.JobType != nil {
-		conditions = append(conditions, "job_type = ?")
+		conditions = append(conditions, "j.job_type = ?")
 		args = append(args, *filter.JobType)
 	}
 
 	if filter.Status != nil {
-		conditions = append(conditions, "status = ?")
+		conditions = append(conditions, "j.status = ?")
 		args = append(args, *filter.Status)
 	}
 
 	if filter.StartDateFrom != nil {
-		conditions = append(conditions, "start_time >= ?")
+		conditions = append(conditions, "j.start_time >= ?")
 		args = append(args, *filter.StartDateFrom)
 	}
 
 	if filter.StartDateTo != nil {
-		conditions = append(conditions, "start_time <= ?")
+		conditions = append(conditions, "j.start_time <= ?")
 		args = append(args, *filter.StartDateTo)
 	}
 
@@ -181,11 +181,15 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, workspace_id, item_id, job_type, status, start_time,
-			   end_time, duration_ms, failure_reason, invoker_type, created_at, updated_at
-		FROM job_instances
+		SELECT j.id, j.workspace_id, j.item_id, j.job_type, j.status, j.start_time,
+			   j.end_time, j.duration_ms, j.failure_reason, j.invoker_type, j.created_at, j.updated_at,
+			   i.display_name as item_display_name, i.type as item_type,
+			   w.display_name as workspace_display_name
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
 		%s
-		ORDER BY start_time DESC
+		ORDER BY j.start_time DESC
 		%s
 	`, whereClause, limitClause)
 
@@ -198,13 +202,30 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	var jobs []JobInstance
 	for rows.Next() {
 		var job JobInstance
+		var itemDisplayName sql.NullString
+		var itemType sql.NullString
+		var workspaceDisplayName sql.NullString
+
 		err := rows.Scan(
 			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
 			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.CreatedAt, &job.UpdatedAt,
+			&itemDisplayName, &itemType, &workspaceDisplayName,
 		)
 		if err != nil {
 			return nil, err
 		}
+
+		// Add item details to the job instance
+		if itemDisplayName.Valid {
+			job.ItemDisplayName = &itemDisplayName.String
+		}
+		if itemType.Valid {
+			job.ItemType = &itemType.String
+		}
+		if workspaceDisplayName.Valid {
+			job.WorkspaceName = &workspaceDisplayName.String
+		}
+
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
