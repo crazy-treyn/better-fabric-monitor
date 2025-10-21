@@ -16,6 +16,36 @@
             error = null;
             analytics = await window.go.main.App.GetAnalytics(selectedDays);
             console.log("Analytics loaded:", analytics);
+
+            // Log individual sections for debugging
+            if (analytics.dailyStatsError) {
+                console.error("Daily stats error:", analytics.dailyStatsError);
+            }
+            if (analytics.workspaceStatsError) {
+                console.error(
+                    "Workspace stats error:",
+                    analytics.workspaceStatsError,
+                );
+            }
+            if (analytics.itemTypeStatsError) {
+                console.error(
+                    "Item type stats error:",
+                    analytics.itemTypeStatsError,
+                );
+            }
+
+            console.log(
+                "Daily stats count:",
+                analytics.dailyStats?.length || 0,
+            );
+            console.log(
+                "Workspace stats count:",
+                analytics.workspaceStats?.length || 0,
+            );
+            console.log(
+                "Item type stats count:",
+                analytics.itemTypeStats?.length || 0,
+            );
         } catch (err) {
             console.error("Failed to load analytics:", err);
             error = err.message || "Failed to load analytics";
