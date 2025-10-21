@@ -292,24 +292,48 @@ func (db *Database) GetLastSyncTime(syncType string) (*time.Time, error) {
 	return &lastSync, nil
 }
 
-// GetMaxJobStartTime returns the maximum start_time from jobs that have an end_time
-// This is used for incremental sync to ensure we only fetch jobs after the latest completed job
+// GetMaxJobStartTime returns the start time to use for incremental sync
+// If there are any in-progress jobs (no end_time), returns the MINIMUM start_time of those jobs
+// Otherwise, returns the MAXIMUM start_time of completed jobs
+// This ensures we always re-check in-progress jobs for status updates
 func (db *Database) GetMaxJobStartTime() (*time.Time, error) {
-	query := `
+	// First check if there are any in-progress jobs
+	queryInProgress := `
+		SELECT MIN(start_time)
+		FROM job_instances
+		WHERE end_time IS NULL
+	`
+
+	var minInProgressStartTime sql.NullTime
+	err := db.conn.QueryRow(queryInProgress).Scan(&minInProgressStartTime)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	// If we found in-progress jobs, return the earliest one
+	if minInProgressStartTime.Valid {
+		return &minInProgressStartTime.Time, nil
+	}
+
+	// No in-progress jobs, use max start time of completed jobs
+	queryCompleted := `
 		SELECT MAX(start_time)
 		FROM job_instances
 		WHERE end_time IS NOT NULL
 	`
 
-	var maxStartTime time.Time
-	err := db.conn.QueryRow(query).Scan(&maxStartTime)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
+	var maxStartTime sql.NullTime
+	err = db.conn.QueryRow(queryCompleted).Scan(&maxStartTime)
+	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	return &maxStartTime, nil
+
+	if maxStartTime.Valid {
+		return &maxStartTime.Time, nil
+	}
+
+	// No jobs at all
+	return nil, nil
 }
 
 // GetInProgressJobIDs returns IDs of jobs that don't have an end time (still in progress)

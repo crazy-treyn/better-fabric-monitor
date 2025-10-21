@@ -379,14 +379,16 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// Check for last sync time to enable incremental loading
-	// Use the max start_time from completed jobs (jobs with end_time) to ensure we don't miss any jobs
+	// GetMaxJobStartTime returns either:
+	// - The MIN start_time of in-progress jobs (to re-check them for completion), OR
+	// - The MAX start_time of completed jobs (if no in-progress jobs exist)
 	var startTimeFrom *time.Time
 	var cachedItemsByWorkspace map[string][]fabric.Item
 	if a.db != nil {
 		maxStartTime, err := a.db.GetMaxJobStartTime()
 		if err == nil && maxStartTime != nil {
 			startTimeFrom = maxStartTime
-			fmt.Printf("Max completed job start time: %s, doing incremental load\n", maxStartTime.Format(time.RFC3339))
+			fmt.Printf("Incremental load starting from: %s\n", maxStartTime.Format(time.RFC3339))
 
 			// For incremental syncs, load cached items from database to avoid API calls
 			cachedItemsByWorkspace = make(map[string][]fabric.Item)
@@ -413,7 +415,8 @@ func (a *App) GetJobs() []map[string]interface{} {
 		} else {
 			fmt.Println("No previous jobs found, doing full load")
 		}
-	} // Get recent jobs across all workspaces (no limit - return all)
+	}
+	// Get recent jobs across all workspaces (no limit - return all)
 	// Pass startTimeFrom for incremental sync (will also fetch all in-progress jobs)
 	// Pass cachedItemsByWorkspace to avoid fetching items from API during incremental syncs
 	jobs, newItems, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom, cachedItemsByWorkspace)
