@@ -303,6 +303,27 @@ func (a *App) GetJobs() []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 
+	// Persist workspaces to database first (needed for foreign key constraints)
+	fmt.Printf("DEBUG: a.db=%v, len(workspaces)=%d\n", a.db != nil, len(workspaces))
+	if a.db != nil && len(workspaces) > 0 {
+		for _, ws := range workspaces {
+			dbWorkspace := &db.Workspace{
+				ID:          ws.ID,
+				DisplayName: ws.DisplayName,
+				Type:        ws.Type,
+			}
+			if ws.Description != "" {
+				dbWorkspace.Description = &ws.Description
+			}
+			if err := a.db.SaveWorkspace(dbWorkspace); err != nil {
+				fmt.Printf("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
+			}
+		}
+		fmt.Printf("Persisted %d workspaces to database\n", len(workspaces))
+	} else {
+		fmt.Printf("Skipping workspace persistence: db=%v, workspaces=%d\n", a.db != nil, len(workspaces))
+	}
+
 	// Check for last sync time to enable incremental loading
 	var startTimeFrom *time.Time
 	if a.db != nil {
