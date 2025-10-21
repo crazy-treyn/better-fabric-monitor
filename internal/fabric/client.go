@@ -225,6 +225,11 @@ func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID string) ([]I
 			return nil, fmt.Errorf("failed to decode response: %w", err)
 		}
 
+		// Populate WorkspaceID for each item
+		for i := range response.Value {
+			response.Value[i].WorkspaceID = workspaceID
+		}
+
 		allItems = append(allItems, response.Value...)
 
 		// Handle pagination
@@ -277,9 +282,11 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 // GetRecentJobs retrieves recent job instances across all workspaces in Fabric
 // If startTimeFrom is provided, only fetches jobs with start_time > startTimeFrom
 // Always fetches jobs with end_time IS NULL (in progress) regardless of start time
-func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limit int, startTimeFrom *time.Time) ([]map[string]interface{}, error) {
+// cachedItems can be provided to avoid fetching items from API (optimization for incremental syncs)
+func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limit int, startTimeFrom *time.Time, cachedItems map[string][]Item) ([]map[string]interface{}, []Item, error) {
 	var allJobs []map[string]interface{}
 	itemCache := make(map[string]Item) // Cache item details
+	var allItems []Item                // Track all items for persistence
 
 	// Item types that support job instances based on Microsoft Fabric documentation
 	// https://learn.microsoft.com/en-us/rest/api/fabric/core/job-scheduler/list-item-job-instances
@@ -298,17 +305,22 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 		fmt.Printf("Fetching jobs from %d workspaces (full sync)...\n", len(workspaces))
 	}
 
+	apiCallCount := 0
 	for _, workspace := range workspaces {
 		fmt.Printf("Checking workspace: %s (%s)\n", workspace.DisplayName, workspace.ID)
 
-		// Get all items in the workspace
+		// Always get all items in the workspace from API to discover new items
+		// This ensures we don't miss any newly created items since the last sync
 		items, err := c.GetWorkspaceItems(ctx, workspace.ID)
+		apiCallCount++
 		if err != nil {
 			fmt.Printf("Warning: failed to get items for workspace %s: %v\n", workspace.ID, err)
 			continue
 		}
+		allItems = append(allItems, items...) // Track for persistence
 
-		// Filter to only items that support job instances
+		// Add delay after API call to avoid rate limiting
+		time.Sleep(200 * time.Millisecond) // Filter to only items that support job instances
 		var supportedItems []Item
 		for _, item := range items {
 			if supportedTypes[item.Type] {
@@ -322,16 +334,18 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 		// Cache items
 		for _, item := range supportedItems {
 			itemCache[item.ID] = item
-			fmt.Printf("  - %s (%s)\n", item.DisplayName, item.Type)
 		}
 
 		// Get job instances for each supported item
-		for _, item := range supportedItems {
-			fmt.Printf("Getting job instances for %s (%s)...\n", item.DisplayName, item.Type)
+		for i, item := range supportedItems {
+			fmt.Printf("[%d/%d] Getting job instances for %s (%s)...\n", i+1, len(supportedItems), item.DisplayName, item.Type)
 
 			instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID)
+			apiCallCount++
 			if err != nil {
 				fmt.Printf("Warning: failed to get job instances for %s: %v\n", item.DisplayName, err)
+				// Add delay even on error to respect rate limits
+				time.Sleep(300 * time.Millisecond)
 				continue
 			}
 
@@ -364,8 +378,8 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 				}
 			}
 
-			// Add a small delay to avoid rate limiting (100ms between requests)
-			time.Sleep(100 * time.Millisecond)
+			// Add delay to avoid rate limiting (200-300ms between requests)
+			time.Sleep(200 * time.Millisecond)
 
 			// Convert to map format for frontend
 			for _, instance := range filteredInstances {
@@ -397,7 +411,7 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 		}
 	}
 
-	fmt.Printf("Total jobs found: %d\n", len(allJobs))
+	fmt.Printf("Total jobs found: %d (made %d API calls)\n", len(allJobs), apiCallCount)
 
 	// Sort by start time (most recent first)
 	sort.Slice(allJobs, func(i, j int) bool {
@@ -411,5 +425,5 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 		allJobs = allJobs[:limit]
 	}
 
-	return allJobs, nil
+	return allJobs, allItems, nil
 }

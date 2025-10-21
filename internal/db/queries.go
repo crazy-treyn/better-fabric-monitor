@@ -292,6 +292,26 @@ func (db *Database) GetLastSyncTime(syncType string) (*time.Time, error) {
 	return &lastSync, nil
 }
 
+// GetMaxJobStartTime returns the maximum start_time from jobs that have an end_time
+// This is used for incremental sync to ensure we only fetch jobs after the latest completed job
+func (db *Database) GetMaxJobStartTime() (*time.Time, error) {
+	query := `
+		SELECT MAX(start_time)
+		FROM job_instances
+		WHERE end_time IS NOT NULL
+	`
+
+	var maxStartTime time.Time
+	err := db.conn.QueryRow(query).Scan(&maxStartTime)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &maxStartTime, nil
+}
+
 // GetInProgressJobIDs returns IDs of jobs that don't have an end time (still in progress)
 func (db *Database) GetInProgressJobIDs() ([]string, error) {
 	query := `

@@ -357,20 +357,44 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// Check for last sync time to enable incremental loading
+	// Use the max start_time from completed jobs (jobs with end_time) to ensure we don't miss any jobs
 	var startTimeFrom *time.Time
+	var cachedItemsByWorkspace map[string][]fabric.Item
 	if a.db != nil {
-		lastSync, err := a.db.GetLastSyncTime("job_instances")
-		if err == nil && lastSync != nil {
-			startTimeFrom = lastSync
-			fmt.Printf("Last sync was at %s, doing incremental load\n", lastSync.Format(time.RFC3339))
-		} else {
-			fmt.Println("No previous sync found, doing full load")
-		}
-	}
+		maxStartTime, err := a.db.GetMaxJobStartTime()
+		if err == nil && maxStartTime != nil {
+			startTimeFrom = maxStartTime
+			fmt.Printf("Max completed job start time: %s, doing incremental load\n", maxStartTime.Format(time.RFC3339))
 
-	// Get recent jobs across all workspaces (no limit - return all)
+			// For incremental syncs, load cached items from database to avoid API calls
+			cachedItemsByWorkspace = make(map[string][]fabric.Item)
+			for _, ws := range workspaces {
+				dbItems, err := a.db.GetItemsByWorkspace(ws.ID)
+				if err == nil && len(dbItems) > 0 {
+					// Convert db.Item to fabric.Item
+					fabricItems := make([]fabric.Item, 0, len(dbItems))
+					for _, dbItem := range dbItems {
+						fabricItem := fabric.Item{
+							ID:          dbItem.ID,
+							DisplayName: dbItem.DisplayName,
+							Type:        dbItem.Type,
+						}
+						if dbItem.Description != nil {
+							fabricItem.Description = *dbItem.Description
+						}
+						fabricItems = append(fabricItems, fabricItem)
+					}
+					cachedItemsByWorkspace[ws.ID] = fabricItems
+					fmt.Printf("Loaded %d cached items for workspace %s\n", len(fabricItems), ws.DisplayName)
+				}
+			}
+		} else {
+			fmt.Println("No previous jobs found, doing full load")
+		}
+	} // Get recent jobs across all workspaces (no limit - return all)
 	// Pass startTimeFrom for incremental sync (will also fetch all in-progress jobs)
-	jobs, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom)
+	// Pass cachedItemsByWorkspace to avoid fetching items from API during incremental syncs
+	jobs, newItems, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom, cachedItemsByWorkspace)
 	if err != nil {
 		fmt.Printf("Failed to get jobs: %v\n", err)
 		return []map[string]interface{}{
@@ -384,7 +408,26 @@ func (a *App) GetJobs() []map[string]interface{} {
 
 	// Persist jobs to DuckDB
 	if a.db != nil && len(jobs) > 0 {
-		// First, persist all unique items that these jobs reference (to satisfy foreign key constraints)
+		// First, persist any new items from the API (for full syncs or new items discovered)
+		if len(newItems) > 0 {
+			for _, fabricItem := range newItems {
+				dbItem := db.Item{
+					ID:          fabricItem.ID,
+					WorkspaceID: fabricItem.WorkspaceID,
+					DisplayName: fabricItem.DisplayName,
+					Type:        fabricItem.Type,
+				}
+				if fabricItem.Description != "" {
+					dbItem.Description = &fabricItem.Description
+				}
+				if err := a.db.SaveItem(&dbItem); err != nil {
+					fmt.Printf("Warning: failed to save new item %s to database: %v\n", dbItem.ID, err)
+				}
+			}
+			fmt.Printf("Persisted %d new items from API to database\n", len(newItems))
+		}
+
+		// Also persist all unique items that these jobs reference (to satisfy foreign key constraints)
 		itemsMap := make(map[string]db.Item)
 		for _, job := range jobs {
 			itemID := job["itemId"].(string)
@@ -399,13 +442,13 @@ func (a *App) GetJobs() []map[string]interface{} {
 			}
 		}
 
-		// Save all items
+		// Save all items referenced by jobs
 		for _, item := range itemsMap {
 			if err := a.db.SaveItem(&item); err != nil {
 				fmt.Printf("Warning: failed to save item %s to database: %v\n", item.ID, err)
 			}
 		}
-		fmt.Printf("Persisted %d unique items to database\n", len(itemsMap))
+		fmt.Printf("Persisted %d unique items from jobs to database\n", len(itemsMap))
 
 		// Now persist job instances
 		dbJobs := make([]db.JobInstance, 0, len(jobs))
