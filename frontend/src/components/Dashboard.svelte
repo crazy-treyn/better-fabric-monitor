@@ -3,13 +3,14 @@
     import { authStore, authActions } from "../stores/auth.js";
     import { filterStore } from "../stores/filters.js";
     import Analytics from "./Analytics.svelte";
+    import Logs from "./Logs.svelte";
 
     let workspaces = [];
     let jobs = [];
     let isLoading = true;
     let sidebarWidth = 350; // Default width in pixels (~20% wider than 256px)
     let isResizing = false;
-    let currentView = "jobs"; // 'jobs' or 'analytics'
+    let currentView = "jobs"; // 'jobs', 'analytics', or 'logs'
 
     // Filter states
     let filterJob = "";
@@ -322,6 +323,15 @@
                     >
                         Analytics
                     </button>
+                    <button
+                        on:click={() => (currentView = "logs")}
+                        class="px-4 py-2 text-sm rounded-md transition-colors {currentView ===
+                        'logs'
+                            ? 'bg-primary-600 text-white'
+                            : 'text-slate-300 hover:text-white hover:bg-slate-700'}"
+                    >
+                        Logs
+                    </button>
                 </div>
             </div>
             <div class="flex items-center gap-3">
@@ -355,6 +365,8 @@
     <main class="flex-1 overflow-hidden">
         {#if currentView === "analytics"}
             <Analytics />
+        {:else if currentView === "logs"}
+            <Logs />
         {:else if !hasLoadedData && !isLoading}
             <div class="flex items-center justify-center h-full">
                 <div class="text-center">

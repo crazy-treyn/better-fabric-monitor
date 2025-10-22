@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"better-fabric-monitor/internal/auth"
@@ -10,6 +12,112 @@ import (
 	"better-fabric-monitor/internal/db"
 	"better-fabric-monitor/internal/fabric"
 )
+
+// LogEntry represents a single log entry
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+}
+
+// LogBuffer stores recent log entries in a circular buffer
+type LogBuffer struct {
+	entries []LogEntry
+	maxSize int
+	index   int
+	mutex   sync.RWMutex
+}
+
+// NewLogBuffer creates a new log buffer with specified size
+func NewLogBuffer(maxSize int) *LogBuffer {
+	return &LogBuffer{
+		entries: make([]LogEntry, 0, maxSize),
+		maxSize: maxSize,
+		index:   0,
+	}
+}
+
+// Add adds a log entry to the buffer
+func (lb *LogBuffer) Add(level, message string) {
+	lb.mutex.Lock()
+	defer lb.mutex.Unlock()
+
+	entry := LogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Message:   message,
+	}
+
+	if len(lb.entries) < lb.maxSize {
+		lb.entries = append(lb.entries, entry)
+	} else {
+		// Circular buffer - overwrite oldest entry
+		lb.entries[lb.index] = entry
+		lb.index = (lb.index + 1) % lb.maxSize
+	}
+}
+
+// GetAll returns all log entries in chronological order
+func (lb *LogBuffer) GetAll() []LogEntry {
+	lb.mutex.RLock()
+	defer lb.mutex.RUnlock()
+
+	if len(lb.entries) < lb.maxSize {
+		// Buffer not full yet, return in order
+		result := make([]LogEntry, len(lb.entries))
+		copy(result, lb.entries)
+		return result
+	}
+
+	// Buffer is full, need to reorder starting from oldest
+	result := make([]LogEntry, lb.maxSize)
+	for i := 0; i < lb.maxSize; i++ {
+		result[i] = lb.entries[(lb.index+i)%lb.maxSize]
+	}
+	return result
+}
+
+// Clear removes all log entries
+func (lb *LogBuffer) Clear() {
+	lb.mutex.Lock()
+	defer lb.mutex.Unlock()
+	lb.entries = make([]LogEntry, 0, lb.maxSize)
+	lb.index = 0
+}
+
+// Global log buffer
+var logBuffer *LogBuffer
+
+// Log adds a log message to the buffer and prints to console
+func Log(format string, args ...interface{}) {
+	message := fmt.Sprintf(format, args...)
+
+	// Print to console as before
+	fmt.Print(message)
+
+	// Detect log level from content
+	level := detectLogLevel(message)
+
+	// Add to buffer
+	if logBuffer != nil {
+		logBuffer.Add(level, strings.TrimSpace(message))
+	}
+}
+
+// detectLogLevel determines the log level based on message content
+func detectLogLevel(message string) string {
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
+		return "ERROR"
+	}
+	if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") {
+		return "WARNING"
+	}
+	if strings.Contains(lower, "debug:") {
+		return "DEBUG"
+	}
+	return "INFO"
+}
 
 // App struct
 type App struct {
@@ -31,10 +139,13 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
+	// Initialize log buffer
+	logBuffer = NewLogBuffer(2000)
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Printf("Failed to load config: %v\n", err)
+		Log("Failed to load config: %v\n", err)
 		// Continue with default config but set essential defaults
 		cfg = &config.Config{
 			Database: config.DatabaseConfig{
@@ -55,11 +166,11 @@ func (a *App) startup(ctx context.Context) {
 	dbPath := cfg.Database.Path
 	if dbPath == "" {
 		dbPath = "data/fabric-monitor.db"
-		fmt.Printf("Warning: database path not set, using default: %s\n", dbPath)
+		Log("Warning: database path not set, using default: %s\n", dbPath)
 	}
 	database, err := db.NewDatabase(dbPath, cfg.Database.EncryptionKey)
 	if err != nil {
-		fmt.Printf("Failed to initialize database: %v\n", err)
+		Log("Failed to initialize database: %v\n", err)
 	} else {
 		a.db = database
 	}
@@ -80,41 +191,41 @@ func (a *App) startup(ctx context.Context) {
 
 	authManager, err := auth.NewAuthManager(authConfig)
 	if err != nil {
-		fmt.Printf("Failed to initialize auth: %v\n", err)
+		Log("Failed to initialize auth: %v\n", err)
 	} else {
 		a.auth = authManager
 
 		// Try to restore existing session from cache
 		if token, err := a.auth.GetToken(ctx); err == nil {
-			fmt.Println("Restored authentication from cache")
+			Log("Restored authentication from cache\n")
 			a.currentToken = token
 			a.fabricClient = fabric.NewClient(token.AccessToken)
 		} else {
-			fmt.Printf("No cached authentication found: %v\n", err)
+			Log("No cached authentication found: %v\n", err)
 		}
 	}
 }
 
 // shutdown is called when the app is closing
 func (a *App) shutdown(ctx context.Context) {
-	fmt.Println("Shutting down application...")
+	Log("Shutting down application...\n")
 
 	// Close database connection
 	if a.db != nil {
 		if err := a.db.Close(); err != nil {
-			fmt.Printf("Error closing database: %v\n", err)
+			Log("Error closing database: %v\n", err)
 		} else {
-			fmt.Println("Database connection closed successfully")
+			Log("Database connection closed successfully\n")
 		}
 	}
 
 	// Clean up authentication if needed
 	if a.auth != nil {
 		// Auth cleanup is already handled by Logout if needed
-		fmt.Println("Authentication cleanup complete")
+		Log("Authentication cleanup complete\n")
 	}
 
-	fmt.Println("Shutdown complete")
+	Log("Shutdown complete\n")
 }
 
 // Login initiates the authentication flow
@@ -234,16 +345,16 @@ func (a *App) GetUserInfo() map[string]interface{} {
 // GetWorkspaces returns available workspaces
 func (a *App) GetWorkspaces() []map[string]interface{} {
 	if a.fabricClient == nil {
-		fmt.Println("Fabric client not initialized, checking cache...")
+		Log("Fabric client not initialized, checking cache...")
 		// Try to load from cache first
 		cachedWorkspaces := a.GetWorkspacesFromCache()
 		if len(cachedWorkspaces) > 0 {
-			fmt.Printf("Loaded %d workspaces from cache\n", len(cachedWorkspaces))
+			Log("Loaded %d workspaces from cache\n", len(cachedWorkspaces))
 			return cachedWorkspaces
 		}
 
 		// No cache, return mock data
-		fmt.Println("No cached workspaces, returning mock data")
+		Log("No cached workspaces, returning mock data")
 		return []map[string]interface{}{
 			{
 				"id":          "workspace-1",
@@ -261,11 +372,11 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 	// Get real workspaces from Fabric API
 	workspaces, err := a.fabricClient.GetWorkspaces(a.ctx)
 	if err != nil {
-		fmt.Printf("Failed to get workspaces from API: %v, checking cache...\n", err)
+		Log("Failed to get workspaces from API: %v, checking cache...\n", err)
 		// Try cache as fallback
 		cachedWorkspaces := a.GetWorkspacesFromCache()
 		if len(cachedWorkspaces) > 0 {
-			fmt.Printf("Loaded %d workspaces from cache as fallback\n", len(cachedWorkspaces))
+			Log("Loaded %d workspaces from cache as fallback\n", len(cachedWorkspaces))
 			return cachedWorkspaces
 		}
 
@@ -290,10 +401,10 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 				dbWorkspace.Description = &ws.Description
 			}
 			if err := a.db.SaveWorkspace(dbWorkspace); err != nil {
-				fmt.Printf("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
+				Log("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
 			}
 		}
-		fmt.Printf("Persisted %d workspaces to database\n", len(workspaces))
+		Log("Persisted %d workspaces to database\n", len(workspaces))
 	}
 
 	// Convert to map format for frontend
@@ -313,7 +424,7 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 // GetJobs returns recent jobs
 func (a *App) GetJobs() []map[string]interface{} {
 	if a.fabricClient == nil {
-		fmt.Println("Fabric client not initialized, returning mock data")
+		Log("Fabric client not initialized, returning mock data")
 		return []map[string]interface{}{
 			{
 				"id":              "job-1",
@@ -353,12 +464,12 @@ func (a *App) GetJobs() []map[string]interface{} {
 	// Get real workspaces first
 	workspaces, err := a.fabricClient.GetWorkspaces(a.ctx)
 	if err != nil {
-		fmt.Printf("Failed to get workspaces for jobs: %v\n", err)
+		Log("Failed to get workspaces for jobs: %v\n", err)
 		return []map[string]interface{}{}
 	}
 
 	// Persist workspaces to database first (needed for foreign key constraints)
-	fmt.Printf("DEBUG: a.db=%v, len(workspaces)=%d\n", a.db != nil, len(workspaces))
+	Log("DEBUG: a.db=%v, len(workspaces)=%d\n", a.db != nil, len(workspaces))
 	if a.db != nil && len(workspaces) > 0 {
 		for _, ws := range workspaces {
 			dbWorkspace := &db.Workspace{
@@ -370,12 +481,12 @@ func (a *App) GetJobs() []map[string]interface{} {
 				dbWorkspace.Description = &ws.Description
 			}
 			if err := a.db.SaveWorkspace(dbWorkspace); err != nil {
-				fmt.Printf("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
+				Log("Warning: failed to save workspace %s to database: %v\n", ws.ID, err)
 			}
 		}
-		fmt.Printf("Persisted %d workspaces to database\n", len(workspaces))
+		Log("Persisted %d workspaces to database\n", len(workspaces))
 	} else {
-		fmt.Printf("Skipping workspace persistence: db=%v, workspaces=%d\n", a.db != nil, len(workspaces))
+		Log("Skipping workspace persistence: db=%v, workspaces=%d\n", a.db != nil, len(workspaces))
 	}
 
 	// Check for last sync time to enable incremental loading
@@ -388,7 +499,7 @@ func (a *App) GetJobs() []map[string]interface{} {
 		maxStartTime, err := a.db.GetMaxJobStartTime()
 		if err == nil && maxStartTime != nil {
 			startTimeFrom = maxStartTime
-			fmt.Printf("Incremental load starting from: %s\n", maxStartTime.Format(time.RFC3339))
+			Log("Incremental load starting from: %s\n", maxStartTime.Format(time.RFC3339))
 
 			// For incremental syncs, load cached items from database to avoid API calls
 			cachedItemsByWorkspace = make(map[string][]fabric.Item)
@@ -409,11 +520,11 @@ func (a *App) GetJobs() []map[string]interface{} {
 						fabricItems = append(fabricItems, fabricItem)
 					}
 					cachedItemsByWorkspace[ws.ID] = fabricItems
-					fmt.Printf("Loaded %d cached items for workspace %s\n", len(fabricItems), ws.DisplayName)
+					Log("Loaded %d cached items for workspace %s\n", len(fabricItems), ws.DisplayName)
 				}
 			}
 		} else {
-			fmt.Println("No previous jobs found, doing full load")
+			Log("No previous jobs found, doing full load")
 		}
 	}
 	// Get recent jobs across all workspaces (no limit - return all)
@@ -421,7 +532,7 @@ func (a *App) GetJobs() []map[string]interface{} {
 	// Pass cachedItemsByWorkspace to avoid fetching items from API during incremental syncs
 	jobs, newItems, err := a.fabricClient.GetRecentJobs(a.ctx, workspaces, 0, startTimeFrom, cachedItemsByWorkspace)
 	if err != nil {
-		fmt.Printf("Failed to get jobs: %v\n", err)
+		Log("Failed to get jobs: %v\n", err)
 		return []map[string]interface{}{
 			{
 				"id":              "error",
@@ -452,10 +563,10 @@ func (a *App) GetJobs() []map[string]interface{} {
 					dbItem.Description = &fabricItem.Description
 				}
 				if err := a.db.SaveItem(&dbItem); err != nil {
-					fmt.Printf("Warning: failed to save new item %s to database: %v\n", dbItem.ID, err)
+					Log("Warning: failed to save new item %s to database: %v\n", dbItem.ID, err)
 				}
 			}
-			fmt.Printf("Persisted %d new items from API to database\n", len(newItems))
+			Log("Persisted %d new items from API to database\n", len(newItems))
 		}
 
 		// Also persist all unique items that these jobs reference (to satisfy foreign key constraints)
@@ -476,10 +587,10 @@ func (a *App) GetJobs() []map[string]interface{} {
 		// Save all items referenced by jobs
 		for _, item := range itemsMap {
 			if err := a.db.SaveItem(&item); err != nil {
-				fmt.Printf("Warning: failed to save item %s to database: %v\n", item.ID, err)
+				Log("Warning: failed to save item %s to database: %v\n", item.ID, err)
 			}
 		}
-		fmt.Printf("Persisted %d unique items from jobs to database\n", len(itemsMap))
+		Log("Persisted %d unique items from jobs to database\n", len(itemsMap))
 
 		// Now persist job instances
 		dbJobs := make([]db.JobInstance, 0, len(jobs))
@@ -487,7 +598,7 @@ func (a *App) GetJobs() []map[string]interface{} {
 			// Parse start time
 			startTime, err := time.Parse(time.RFC3339, job["startTime"].(string))
 			if err != nil {
-				fmt.Printf("Warning: failed to parse start time: %v\n", err)
+				Log("Warning: failed to parse start time: %v\n", err)
 				continue
 			}
 
@@ -527,16 +638,16 @@ func (a *App) GetJobs() []map[string]interface{} {
 
 		if len(dbJobs) > 0 {
 			if err := a.db.SaveJobInstances(dbJobs); err != nil {
-				fmt.Printf("Warning: failed to save jobs to database: %v\n", err)
+				Log("Warning: failed to save jobs to database: %v\n", err)
 			} else {
 				if startTimeFrom != nil {
-					fmt.Printf("Persisted %d new/updated job instances to database (incremental)\n", len(dbJobs))
+					Log("Persisted %d new/updated job instances to database (incremental)\n", len(dbJobs))
 				} else {
-					fmt.Printf("Persisted %d job instances to database (full sync)\n", len(dbJobs))
+					Log("Persisted %d job instances to database (full sync)\n", len(dbJobs))
 				}
 				// Record sync metadata
 				if err := a.db.UpdateSyncMetadata("job_instances", len(dbJobs), 0); err != nil {
-					fmt.Printf("Warning: failed to update sync metadata: %v\n", err)
+					Log("Warning: failed to update sync metadata: %v\n", err)
 				}
 			}
 		}
@@ -551,7 +662,7 @@ func (a *App) GetJobs() []map[string]interface{} {
 
 	// If doing incremental sync, merge with cached data to get complete view
 	if startTimeFrom != nil && a.db != nil && len(cachedJobs) > 0 {
-		fmt.Println("Merging fresh jobs with cached historical data...")
+		Log("Merging fresh jobs with cached historical data...")
 
 		// Create a map of fresh jobs by ID for quick lookup
 		freshJobMap := make(map[string]map[string]interface{})
@@ -574,7 +685,7 @@ func (a *App) GetJobs() []map[string]interface{} {
 			}
 		}
 
-		fmt.Printf("Total jobs after merge: %d (fresh: %d, cached: %d, replaced: %d)\n",
+		Log("Total jobs after merge: %d (fresh: %d, cached: %d, replaced: %d)\n",
 			len(mergedJobs), len(jobs), len(cachedJobs), len(freshJobMap))
 
 		return mergedJobs
@@ -593,7 +704,7 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 	filter := db.JobFilter{}
 	jobs, err := a.db.GetJobInstances(filter)
 	if err != nil {
-		fmt.Printf("Failed to get jobs from cache: %v\n", err)
+		Log("Failed to get jobs from cache: %v\n", err)
 		return []map[string]interface{}{}
 	}
 
@@ -643,7 +754,7 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		result = append(result, jobMap)
 	}
 
-	fmt.Printf("Loaded %d jobs from cache\n", len(result))
+	Log("Loaded %d jobs from cache\n", len(result))
 	return result
 }
 
@@ -656,7 +767,7 @@ func (a *App) GetWorkspacesFromCache() []map[string]interface{} {
 	// Get all workspaces from database
 	workspaces, err := a.db.GetWorkspaces()
 	if err != nil {
-		fmt.Printf("Failed to get workspaces from cache: %v\n", err)
+		Log("Failed to get workspaces from cache: %v\n", err)
 		return []map[string]interface{}{}
 	}
 
@@ -676,7 +787,7 @@ func (a *App) GetWorkspacesFromCache() []map[string]interface{} {
 		result = append(result, wsMap)
 	}
 
-	fmt.Printf("Loaded %d workspaces from cache\n", len(result))
+	Log("Loaded %d workspaces from cache\n", len(result))
 	return result
 }
 
@@ -711,7 +822,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get daily stats
 	dailyStats, err := a.db.GetDailyStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get daily stats: %v\n", err)
+		Log("Failed to get daily stats: %v\n", err)
 		result["dailyStatsError"] = err.Error()
 	} else {
 		result["dailyStats"] = dailyStats
@@ -720,7 +831,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get workspace stats
 	workspaceStats, err := a.db.GetWorkspaceStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get workspace stats: %v\n", err)
+		Log("Failed to get workspace stats: %v\n", err)
 		result["workspaceStatsError"] = err.Error()
 	} else {
 		result["workspaceStats"] = workspaceStats
@@ -729,7 +840,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get item type stats
 	itemTypeStats, err := a.db.GetItemTypeStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get item type stats: %v\n", err)
+		Log("Failed to get item type stats: %v\n", err)
 		result["itemTypeStatsError"] = err.Error()
 	} else {
 		result["itemTypeStats"] = itemTypeStats
@@ -738,7 +849,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get recent failures (last 10 within the time period)
 	recentFailures, err := a.db.GetRecentFailures(10, days)
 	if err != nil {
-		fmt.Printf("Failed to get recent failures: %v\n", err)
+		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
 		result["recentFailures"] = recentFailures
@@ -747,7 +858,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get long-running jobs (50% or more above average, last 10)
 	longRunningJobs, err := a.db.GetLongRunningJobs(days, 50.0, 10)
 	if err != nil {
-		fmt.Printf("Failed to get long-running jobs: %v\n", err)
+		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
 		result["longRunningJobs"] = longRunningJobs
@@ -756,7 +867,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 	// Get overall stats - calculated entirely in DuckDB for consistency
 	overallStats, err := a.db.GetOverallStats(days)
 	if err != nil {
-		fmt.Printf("Failed to get overall stats: %v\n", err)
+		Log("Failed to get overall stats: %v\n", err)
 		result["overallStatsError"] = err.Error()
 	} else {
 		result["overallStats"] = map[string]interface{}{
@@ -791,7 +902,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get daily stats
 	dailyStats, err := a.db.GetDailyStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get daily stats: %v\n", err)
+		Log("Failed to get daily stats: %v\n", err)
 		result["dailyStatsError"] = err.Error()
 	} else {
 		result["dailyStats"] = dailyStats
@@ -800,7 +911,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get workspace stats
 	workspaceStats, err := a.db.GetWorkspaceStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get workspace stats: %v\n", err)
+		Log("Failed to get workspace stats: %v\n", err)
 		result["workspaceStatsError"] = err.Error()
 	} else {
 		result["workspaceStats"] = workspaceStats
@@ -809,7 +920,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get item type stats
 	itemTypeStats, err := a.db.GetItemTypeStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get item type stats: %v\n", err)
+		Log("Failed to get item type stats: %v\n", err)
 		result["itemTypeStatsError"] = err.Error()
 	} else {
 		result["itemTypeStats"] = itemTypeStats
@@ -818,7 +929,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get recent failures (last 10 within the time period)
 	recentFailures, err := a.db.GetRecentFailuresFiltered(10, days, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get recent failures: %v\n", err)
+		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
 		result["recentFailures"] = recentFailures
@@ -827,7 +938,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get long-running jobs (50% or more above average, last 10)
 	longRunningJobs, err := a.db.GetLongRunningJobsFiltered(days, 50.0, 10, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get long-running jobs: %v\n", err)
+		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
 		result["longRunningJobs"] = longRunningJobs
@@ -836,7 +947,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 	// Get overall stats - calculated entirely in DuckDB for consistency
 	overallStats, err := a.db.GetOverallStatsFiltered(days, workspaceIDs, itemTypes, itemNameSearch)
 	if err != nil {
-		fmt.Printf("Failed to get overall stats: %v\n", err)
+		Log("Failed to get overall stats: %v\n", err)
 		result["overallStatsError"] = err.Error()
 	} else {
 		result["overallStats"] = map[string]interface{}{
@@ -866,7 +977,7 @@ func (a *App) GetAvailableItemTypes(days int, workspaceIDs []string) []string {
 
 	itemTypes, err := a.db.GetAvailableItemTypes(days, workspaceIDs)
 	if err != nil {
-		fmt.Printf("Failed to get available item types: %v\n", err)
+		Log("Failed to get available item types: %v\n", err)
 		return []string{}
 	}
 
@@ -971,7 +1082,7 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 
 	rows, err := a.db.GetConnection().Query(query)
 	if err != nil {
-		fmt.Printf("Failed to query pipeline jobs for activity runs: %v\n", err)
+		Log("Failed to query pipeline jobs for activity runs: %v\n", err)
 		return
 	}
 	defer rows.Close()
@@ -987,7 +1098,7 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 	for rows.Next() {
 		var job pipelineJob
 		if err := rows.Scan(&job.ID, &job.WorkspaceID, &job.StartTime, &job.EndTime); err != nil {
-			fmt.Printf("Failed to scan pipeline job: %v\n", err)
+			Log("Failed to scan pipeline job: %v\n", err)
 			continue
 		}
 		jobs = append(jobs, job)
@@ -997,7 +1108,7 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 		return
 	}
 
-	fmt.Printf("Fetching activity runs for %d pipeline jobs in parallel...\n", len(jobs))
+	Log("Fetching activity runs for %d pipeline jobs in parallel...\n", len(jobs))
 	startTime := time.Now()
 
 	// Create worker pool for parallel processing (limit to 20 concurrent requests)
@@ -1074,7 +1185,7 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 
 	for result := range results {
 		if result.err != nil {
-			fmt.Printf("Failed to fetch activity runs for job %s: %v\n", result.jobID, result.err)
+			Log("Failed to fetch activity runs for job %s: %v\n", result.jobID, result.err)
 			errorCount++
 			// Do NOT mark as processed - leave activity_runs as NULL so it can be retried
 			// This allows the job to be re-enriched on the next sync
@@ -1083,7 +1194,7 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 
 		// Save activity runs (even if empty array - this is a valid result)
 		if err := a.db.UpdateJobInstanceActivityRuns(result.jobID, result.activityRuns); err != nil {
-			fmt.Printf("Failed to save activity runs for job %s: %v\n", result.jobID, err)
+			Log("Failed to save activity runs for job %s: %v\n", result.jobID, err)
 			errorCount++
 			continue
 		}
@@ -1093,8 +1204,8 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 	}
 
 	elapsed := time.Since(startTime)
-	fmt.Printf("Activity runs sync completed in %v\n", elapsed)
-	fmt.Printf("Successfully fetched activity runs for %d/%d pipeline jobs (%d activities, %d errors)\n",
+	Log("Activity runs sync completed in %v\n", elapsed)
+	Log("Successfully fetched activity runs for %d/%d pipeline jobs (%d activities, %d errors)\n",
 		successCount, len(jobs), totalActivities, errorCount)
 }
 
@@ -1172,6 +1283,22 @@ func (a *App) GetActivityRunsSample() map[string]interface{} {
 		"jobID":        jobID,
 		"displayName":  displayName,
 		"activityRuns": activityRunsJSON,
+	}
+}
+
+// GetLogs returns all log entries
+func (a *App) GetLogs() []LogEntry {
+	if logBuffer == nil {
+		return []LogEntry{}
+	}
+	return logBuffer.GetAll()
+}
+
+// ClearLogs clears all log entries
+func (a *App) ClearLogs() {
+	if logBuffer != nil {
+		logBuffer.Clear()
+		Log("Logs cleared\n")
 	}
 }
 
