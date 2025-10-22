@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -234,6 +235,175 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
+}
+
+// UpdateJobInstanceActivityRuns updates the activity runs for a job instance
+func (db *Database) UpdateJobInstanceActivityRuns(jobID string, activityRuns []ActivityRun) error {
+	activityRunsJSON, err := json.Marshal(activityRuns)
+	if err != nil {
+		return fmt.Errorf("failed to marshal activity runs: %w", err)
+	}
+
+	query := `
+		UPDATE job_instances 
+		SET activity_runs = ?,
+			updated_at = get_current_timestamp()
+		WHERE id = ?
+	`
+
+	_, err = db.conn.Exec(query, string(activityRunsJSON), jobID)
+	return err
+}
+
+// GetJobInstanceWithActivities retrieves a job instance with its activity runs
+func (db *Database) GetJobInstanceWithActivities(jobID string) (*JobInstance, error) {
+	query := `
+		SELECT 
+			j.id, j.workspace_id, j.item_id, j.job_type, j.status, 
+			j.start_time, j.end_time, j.duration_ms, j.failure_reason, 
+			j.invoker_type, j.root_activity_id, j.activity_runs,
+			j.created_at, j.updated_at,
+			i.display_name as item_display_name, i.type as item_type,
+			w.display_name as workspace_display_name
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		WHERE j.id = ?
+	`
+
+	var job JobInstance
+	var activityRunsJSON sql.NullString
+	var itemDisplayName sql.NullString
+	var itemType sql.NullString
+	var workspaceDisplayName sql.NullString
+	var rootActivityID sql.NullString
+
+	err := db.conn.QueryRow(query, jobID).Scan(
+		&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status,
+		&job.StartTime, &job.EndTime, &job.DurationMs, &job.FailureReason,
+		&job.InvokerType, &rootActivityID, &activityRunsJSON,
+		&job.CreatedAt, &job.UpdatedAt,
+		&itemDisplayName, &itemType, &workspaceDisplayName,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Set optional fields
+	if itemDisplayName.Valid {
+		job.ItemDisplayName = &itemDisplayName.String
+	}
+	if itemType.Valid {
+		job.ItemType = &itemType.String
+	}
+	if workspaceDisplayName.Valid {
+		job.WorkspaceName = &workspaceDisplayName.String
+	}
+	if rootActivityID.Valid {
+		job.RootActivityID = &rootActivityID.String
+	}
+
+	// Unmarshal activity runs if present
+	if activityRunsJSON.Valid && activityRunsJSON.String != "" {
+		if err := json.Unmarshal([]byte(activityRunsJSON.String), &job.ActivityRuns); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal activity runs: %w", err)
+		}
+		count := len(job.ActivityRuns)
+		job.ActivityCount = &count
+	}
+
+	return &job, nil
+}
+
+// GetChildExecutions extracts child pipeline and notebook executions from activity runs
+func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
+	query := `
+		SELECT 
+			json_extract_string(activity, '$.activityRunId') as activity_run_id,
+			json_extract_string(activity, '$.activityName') as activity_name,
+			json_extract_string(activity, '$.activityType') as activity_type,
+			json_extract_string(activity, '$.status') as status,
+			json_extract_string(activity, '$.activityRunStart') as start_time,
+			json_extract_string(activity, '$.activityRunEnd') as end_time,
+			CAST(json_extract(activity, '$.durationInMs') AS BIGINT) as duration_ms,
+			json_extract_string(activity, '$.error.message') as error_message,
+			json_extract_string(activity, '$.pipelineId') as pipeline_id
+		FROM job_instances j
+		CROSS JOIN unnest(
+			CASE 
+				WHEN j.activity_runs IS NOT NULL 
+				THEN CAST(j.activity_runs AS JSON[])
+				ELSE []::JSON[]
+			END
+		) as t(activity)
+		WHERE j.id = ?
+			AND json_extract_string(activity, '$.activityType') IN ('ExecutePipeline', 'TridentNotebook')
+		ORDER BY json_extract_string(activity, '$.activityRunStart') ASC
+	`
+
+	rows, err := db.conn.Query(query, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var children []ChildExecution
+	for rows.Next() {
+		var child ChildExecution
+		var startTimeStr sql.NullString
+		var endTimeStr sql.NullString
+		var durationMs sql.NullInt64
+		var errorMsg sql.NullString
+
+		err := rows.Scan(
+			&child.ActivityRunID,
+			&child.ActivityName,
+			&child.ActivityType,
+			&child.Status,
+			&startTimeStr,
+			&endTimeStr,
+			&durationMs,
+			&errorMsg,
+			&child.PipelineID,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Parse start time if present
+		if startTimeStr.Valid && startTimeStr.String != "" {
+			startTime, err := time.Parse(time.RFC3339, startTimeStr.String)
+			if err == nil {
+				child.StartTime = &startTime
+			}
+		}
+
+		// Parse end time if present
+		if endTimeStr.Valid && endTimeStr.String != "" {
+			endTime, err := time.Parse(time.RFC3339, endTimeStr.String)
+			if err == nil {
+				child.EndTime = &endTime
+			}
+		}
+
+		// Set duration if valid
+		if durationMs.Valid {
+			child.DurationMs = &durationMs.Int64
+		}
+
+		// Set error message if present
+		if errorMsg.Valid && errorMsg.String != "" {
+			child.ErrorMessage = &errorMsg.String
+		}
+
+		// For future recursive expansion - check if this is an ExecutePipeline
+		child.HasChildren = child.ActivityType == "ExecutePipeline"
+
+		children = append(children, child)
+	}
+
+	return children, rows.Err()
 }
 
 // GetOverallStats returns aggregated statistics for the specified time period

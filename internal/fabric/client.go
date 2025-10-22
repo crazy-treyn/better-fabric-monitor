@@ -1,6 +1,7 @@
 package fabric
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -298,6 +299,129 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 	}
 
 	return allInstances, nil
+}
+
+// QueryActivityRunsResponse represents the response from the QueryActivityRuns API
+type QueryActivityRunsResponse struct {
+	Value             []ActivityRun `json:"value"`
+	ContinuationToken *string       `json:"continuationToken"`
+}
+
+// QueryActivityRuns retrieves all activity runs for a pipeline job instance with pagination support
+func (c *Client) QueryActivityRuns(ctx context.Context, workspaceID, jobInstanceID string, startTime, endTime time.Time) ([]ActivityRun, error) {
+	url := fmt.Sprintf("%s/workspaces/%s/datapipelines/pipelineruns/%s/queryactivityruns",
+		c.baseURL, workspaceID, jobInstanceID)
+
+	var allActivityRuns []ActivityRun
+	var continuationToken *string
+	pageCount := 0
+
+	for {
+		pageCount++
+
+		requestBody := map[string]interface{}{
+			"filters": []interface{}{},
+			"orderBy": []map[string]string{
+				{"orderBy": "ActivityRunStart", "order": "DESC"},
+			},
+			"lastUpdatedAfter":  startTime.Format(time.RFC3339),
+			"lastUpdatedBefore": endTime.Format(time.RFC3339),
+		}
+
+		// Add continuation token if we have one
+		if continuationToken != nil && *continuationToken != "" {
+			requestBody["continuationToken"] = *continuationToken
+		}
+
+		bodyBytes, err := json.Marshal(requestBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.accessToken)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.doRequestWithRetry(ctx, req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		}
+
+		// Read the response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		// Parse response with proper structure
+		var response QueryActivityRunsResponse
+		err = json.Unmarshal(body, &response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode response: %w, body: %s", err, string(body[:min(500, len(body))]))
+		}
+
+		// Append results from this page
+		allActivityRuns = append(allActivityRuns, response.Value...)
+
+		if len(response.Value) > 0 {
+			fmt.Printf("Fetched %d activity runs for job %s (page %d, total so far: %d)\n",
+				len(response.Value), jobInstanceID, pageCount, len(allActivityRuns))
+		}
+
+		// Check if we need to fetch more pages
+		if response.ContinuationToken == nil || *response.ContinuationToken == "" {
+			break
+		}
+
+		continuationToken = response.ContinuationToken
+	}
+
+	if len(allActivityRuns) > 0 {
+		fmt.Printf("Total activity runs fetched for job %s: %d (across %d pages)\n", jobInstanceID, len(allActivityRuns), pageCount)
+	}
+
+	return allActivityRuns, nil
+}
+
+// ActivityRun represents a single activity execution within a pipeline
+type ActivityRun struct {
+	PipelineID              string                 `json:"pipelineId"`
+	PipelineRunID           string                 `json:"pipelineRunId"`
+	ActivityName            string                 `json:"activityName"`
+	ActivityType            string                 `json:"activityType"`
+	ActivityRunID           string                 `json:"activityRunId"`
+	Status                  string                 `json:"status"`
+	ActivityRunStart        string                 `json:"activityRunStart"`
+	ActivityRunEnd          string                 `json:"activityRunEnd"`
+	DurationInMs            int64                  `json:"durationInMs"`
+	Input                   map[string]interface{} `json:"input"`
+	Output                  map[string]interface{} `json:"output"`
+	Error                   ActivityError          `json:"error"`
+	RetryAttempt            *int                   `json:"retryAttempt"`
+	IterationHash           string                 `json:"iterationHash"`
+	UserProperties          map[string]interface{} `json:"userProperties"`
+	RecoveryStatus          string                 `json:"recoveryStatus"`
+	IntegrationRuntimeNames []string               `json:"integrationRuntimeNames"`
+	ExecutionDetails        map[string]interface{} `json:"executionDetails"`
+}
+
+// ActivityError represents error information from an activity run
+type ActivityError struct {
+	ErrorCode   string          `json:"errorCode"`
+	Message     string          `json:"message"`
+	FailureType string          `json:"failureType"`
+	Target      string          `json:"target"`
+	Details     json.RawMessage `json:"details"` // Can be string or array depending on error type
 }
 
 // GetRecentJobs retrieves recent job instances across all workspaces in Fabric with parallel processing
