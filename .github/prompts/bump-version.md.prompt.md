@@ -4,7 +4,7 @@ mode: agent
 # Bump Version Number
 
 ## Objective
-Update the Better Fabric Monitor application to a new version number across all relevant files, create a git tag, sign the executable, and prepare for release.
+Update the Better Fabric Monitor application to a new version number and create a git tag that will trigger an automated build and release via GitHub Actions.
 
 ## Instructions for LLM Agent
 
@@ -54,51 +54,35 @@ git tag -a v[NEW_VERSION] -m "Release v[NEW_VERSION] - [RELEASE_DESCRIPTION]"
 
 ---
 
-## Step 3: Build Production Executable
+## Step 3: Push to Repository
 
-Build the production executable with the new version embedded:
-
-```powershell
-wails build
-```
-
-The executable will be created at: `build/bin/better-fabric-monitor.exe`
-
----
-
-## Step 4: Generate Signature File
-
-Create a SHA-256 signature file for the executable:
-
-```powershell
-Get-FileHash -Algorithm SHA256 build/bin/better-fabric-monitor.exe | Select-Object -ExpandProperty Hash | Out-File -Encoding ASCII build/bin/better-fabric-monitor.exe.sha256
-```
-
-This creates a signature file that can be used to verify the integrity of the executable.
-
----
-
-## Step 5: Push to Repository
-
-Push the version changes and tag to the remote repository:
+Push the version changes and tag to trigger the automated build:
 
 ```powershell
 git push origin [CURRENT_BRANCH]
 git push origin v[NEW_VERSION]
 ```
 
+**GitHub Actions will automatically:**
+1. Build the production executable with the new version embedded
+2. Generate the SHA-256 checksum file
+3. Create a GitHub Release with both files attached
+4. Add installation instructions and verification steps
+
 ---
 
-## Step 6: Verification
+## Step 4: Verification
 
-Verify the following and **report these results back to the user**:
+After pushing, verify the following and **report these results back to the user**:
 
-1. **Executable metadata:** Right-click `build/bin/better-fabric-monitor.exe` → Properties → Details tab should show version [NEW_VERSION]
-2. **Signature file exists:** Check that `build/bin/better-fabric-monitor.exe.sha256` was created
-3. **UI displays version:** Run the app and navigate to Logs page - footer should show "• v[NEW_VERSION]"
-4. **Git tag exists:** Run `git tag -l` and confirm `v[NEW_VERSION]` is listed
+1. **GitHub Actions workflow:** Check that the workflow started at `https://github.com/crazy-treyn/better-fabric-monitor/actions`
+2. **Workflow completion:** Wait for the build to complete (typically 2-3 minutes)
+3. **Release created:** Verify release exists at `https://github.com/crazy-treyn/better-fabric-monitor/releases/tag/v[NEW_VERSION]`
+4. **Artifacts attached:** Confirm both `better-fabric-monitor.exe` and `better-fabric-monitor.exe.sha256` are attached to the release
 
-**Present the verification results to the user in a clear summary showing which items passed/failed.**
+**Present the verification results to the user with links to:**
+- GitHub Actions workflow run
+- GitHub Release page
 
 ---
 
@@ -107,10 +91,24 @@ Verify the following and **report these results back to the user**:
 - `wails.json` - Primary version metadata (embedded in Windows EXE)
 - `internal/config/config.go` - Backend version (displayed in UI)
 
-## Build Artifacts
+## Automated Build Process
 
-- `build/bin/better-fabric-monitor.exe` - Signed production executable
-- `build/bin/better-fabric-monitor.exe.sha256` - SHA-256 signature for verification
+The `.github/workflows/release.yml` workflow handles:
+- ✅ Installing Go 1.24+
+- ✅ Installing Node.js 24+
+- ✅ Installing Wails CLI
+- ✅ Installing frontend dependencies
+- ✅ Building production executable
+- ✅ Generating SHA-256 checksum
+- ✅ Creating GitHub Release with artifacts
+- ✅ Adding installation instructions
+
+## Build Artifacts (Attached to GitHub Release)
+
+- `better-fabric-monitor.exe` - Production executable with embedded version
+- `better-fabric-monitor.exe.sha256` - SHA-256 checksum for integrity verification
+
+Users can download from: `https://github.com/crazy-treyn/better-fabric-monitor/releases/latest`
 
 ---
 

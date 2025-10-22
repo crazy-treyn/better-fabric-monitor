@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        shell: pwsh
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm install
+        shell: pwsh
+
+      - name: Build application
+        run: wails build
+        shell: pwsh
+
+      - name: Generate SHA-256 checksum
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 build/bin/better-fabric-monitor.exe).Hash
+          $hash | Out-File -Encoding ASCII -NoNewline build/bin/better-fabric-monitor.exe.sha256
+        shell: pwsh
+
+      - name: Verify build artifacts
+        run: |
+          if (!(Test-Path build/bin/better-fabric-monitor.exe)) {
+            Write-Error "Build failed: executable not found"
+            exit 1
+          }
+          if (!(Test-Path build/bin/better-fabric-monitor.exe.sha256)) {
+            Write-Error "Build failed: checksum file not found"
+            exit 1
+          }
+          Write-Host "✓ Executable size: $((Get-Item build/bin/better-fabric-monitor.exe).Length / 1MB) MB"
+          Write-Host "✓ SHA-256: $(Get-Content build/bin/better-fabric-monitor.exe.sha256)"
+        shell: pwsh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/bin/better-fabric-monitor.exe
+            build/bin/better-fabric-monitor.exe.sha256
+          body: |
+            ## Installation
+            
+            1. Download `better-fabric-monitor.exe`
+            2. (Optional) Verify integrity:
+               ```powershell
+               $expected = (Get-Content better-fabric-monitor.exe.sha256).Trim()
+               $actual = (Get-FileHash better-fabric-monitor.exe).Hash
+               if ($expected -eq $actual) { Write-Host "✓ Checksum verified" } else { Write-Error "✗ Checksum mismatch!" }
+               ```
+            3. Run the application
+            
+            ## What's Changed
+            
+            See commit history for details.
+            
+            ## Prerequisites
+            
+            - Windows 10/11 with WebView2 Runtime (pre-installed on modern Windows)
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
