@@ -137,7 +137,7 @@ func (db *Database) initSchema() error {
 	-- Sync metadata
 	CREATE TABLE IF NOT EXISTS sync_metadata (
 		id BIGINT PRIMARY KEY DEFAULT nextval('sync_metadata_id_seq'),
-		last_sync_time TIMESTAMP NOT NULL,
+		last_sync_time TIMESTAMPTZ NOT NULL,
 		sync_type VARCHAR NOT NULL,
 		records_synced INTEGER NOT NULL,
 		errors INTEGER DEFAULT 0,

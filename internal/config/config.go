@@ -95,7 +95,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("app.debug", false)
 	viper.SetDefault("app.log_level", "info")
 	viper.SetDefault("app.name", "Better Fabric Monitor")
-	viper.SetDefault("app.version", "1.0.0")
+	viper.SetDefault("app.version", "0.2.0")
 
 	// Environment variable bindings
 	viper.SetEnvPrefix("FABRIC_MONITOR")
@@ -176,12 +176,8 @@ func (c *Config) Save() error {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	if c.Auth.ClientID == "" {
-		return fmt.Errorf("auth.client_id is required")
-	}
-	if c.Auth.TenantID == "" {
-		return fmt.Errorf("auth.tenant_id is required")
-	}
+	// client_id is optional - app will use Microsoft PowerShell public client as fallback
+	// tenant_id is optional - can be provided at login time
 	if c.UI.PrimaryColor == "" {
 		return fmt.Errorf("ui.primary_color is required")
 	}

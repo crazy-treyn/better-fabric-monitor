@@ -411,9 +411,9 @@ func (db *Database) GetOverallStats(days int) (*JobStats, error) {
 	query := `
 		SELECT
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN status = 'Completed' AND duration_ms IS NOT NULL THEN duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances
 		WHERE start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -448,8 +448,8 @@ func (db *Database) GetJobStats(workspaceID string, from, to time.Time) (*JobSta
 	query := `
 		SELECT
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed,
+			COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
 			AVG(duration_ms) as avg_duration_ms
 		FROM job_instances
 		WHERE workspace_id = ? AND start_time >= ? AND start_time <= ?
@@ -579,9 +579,9 @@ func (db *Database) GetDailyStats(days int) ([]DailyStats, error) {
 		SELECT
 			DATE_TRUNC('day', start_time)::DATE as date,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances
 		WHERE start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -625,9 +625,9 @@ func (db *Database) GetWorkspaceStats(days int) ([]WorkspaceStats, error) {
 			j.workspace_id,
 			w.display_name as workspace_name,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
@@ -671,9 +671,9 @@ func (db *Database) GetItemTypeStats(days int) ([]ItemTypeStats, error) {
 		SELECT
 			i.type as item_type,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
@@ -829,16 +829,19 @@ func (db *Database) GetItemStatsByWorkspace(workspaceID string, days int) ([]Ite
 			j.item_id,
 			i.display_name as item_name,
 			i.type as item_type,
+			j.workspace_id,
+			w.display_name as workspace_name,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
 		WHERE j.workspace_id = ?
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
-		GROUP BY j.item_id, i.display_name, i.type
+		GROUP BY j.item_id, i.display_name, i.type, j.workspace_id, w.display_name
 		ORDER BY total_jobs DESC
 	`
 
@@ -853,7 +856,7 @@ func (db *Database) GetItemStatsByWorkspace(workspaceID string, days int) ([]Ite
 		var s ItemStats
 		var avgDuration sql.NullFloat64
 
-		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.WorkspaceID, &s.WorkspaceName, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
 		if err != nil {
 			return nil, err
 		}
@@ -878,16 +881,19 @@ func (db *Database) GetItemStatsByJobType(itemType string, days int) ([]ItemStat
 			j.item_id,
 			i.display_name as item_name,
 			i.type as item_type,
+			j.workspace_id,
+			w.display_name as workspace_name,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
 		WHERE i.type = ?
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
-		GROUP BY j.item_id, i.display_name, i.type
+		GROUP BY j.item_id, i.display_name, i.type, j.workspace_id, w.display_name
 		ORDER BY total_jobs DESC
 	`
 
@@ -902,11 +908,77 @@ func (db *Database) GetItemStatsByJobType(itemType string, days int) ([]ItemStat
 		var s ItemStats
 		var avgDuration sql.NullFloat64
 
-		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
+		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.WorkspaceID, &s.WorkspaceName, &s.TotalJobs, &s.Successful, &s.Failed, &s.Running, &avgDuration)
 		if err != nil {
 			return nil, err
 		}
 
+		if avgDuration.Valid {
+			s.AvgDurationMs = avgDuration.Float64
+		}
+
+		if s.TotalJobs > 0 {
+			s.SuccessRate = float64(s.Successful) / float64(s.TotalJobs) * 100
+		}
+
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+// GetItemStatsByDate returns job statistics for each item on a specific date with optional filters
+func (db *Database) GetItemStatsByDate(date string, workspaceIDs []string, itemTypes []string, itemNameSearch string) ([]DailyItemStats, error) {
+	filterClause, filterArgs := buildFilterConditions(workspaceIDs, itemTypes, itemNameSearch)
+
+	query := fmt.Sprintf(`
+		SELECT
+			j.item_id,
+			i.display_name as item_name,
+			i.type as item_type,
+			j.workspace_id,
+			w.display_name as workspace_name,
+			COUNT(*) as total_jobs,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			MIN(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms END) as min_duration_ms,
+			MAX(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms END) as max_duration_ms,
+			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms END) as avg_duration_ms
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		WHERE DATE_TRUNC('day', j.start_time)::DATE = ?
+		%s
+		GROUP BY j.item_id, i.display_name, i.type, j.workspace_id, w.display_name
+		ORDER BY total_jobs DESC
+	`, filterClause)
+
+	args := []interface{}{date}
+	args = append(args, filterArgs...)
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []DailyItemStats
+	for rows.Next() {
+		var s DailyItemStats
+		var minDuration sql.NullInt64
+		var maxDuration sql.NullInt64
+		var avgDuration sql.NullFloat64
+
+		err := rows.Scan(&s.ItemID, &s.ItemName, &s.ItemType, &s.WorkspaceID, &s.WorkspaceName, &s.TotalJobs, &s.Successful, &s.Failed, &minDuration, &maxDuration, &avgDuration)
+		if err != nil {
+			return nil, err
+		}
+
+		if minDuration.Valid {
+			s.MinDurationMs = minDuration.Int64
+		}
+		if maxDuration.Valid {
+			s.MaxDurationMs = maxDuration.Int64
+		}
 		if avgDuration.Valid {
 			s.AvgDurationMs = avgDuration.Float64
 		}
@@ -1044,9 +1116,9 @@ func (db *Database) GetOverallStatsFiltered(days int, workspaceIDs []string, ite
 	query := fmt.Sprintf(`
 		SELECT
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.status = 'Completed' AND j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
@@ -1089,9 +1161,9 @@ func (db *Database) GetDailyStatsFiltered(days int, workspaceIDs []string, itemT
 		SELECT
 			DATE_TRUNC('day', j.start_time)::DATE as date,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
@@ -1142,9 +1214,9 @@ func (db *Database) GetWorkspaceStatsFiltered(days int, workspaceIDs []string, i
 			j.workspace_id,
 			w.display_name as workspace_name,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
@@ -1195,9 +1267,9 @@ func (db *Database) GetItemTypeStatsFiltered(days int, workspaceIDs []string, it
 		SELECT
 			i.type as item_type,
 			COUNT(*) as total_jobs,
-			SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END) as successful,
-			SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END) as running,
+			COALESCE(SUM(CASE WHEN j.status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
+			COALESCE(SUM(CASE WHEN j.status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN j.status IN ('InProgress', 'Running', 'NotStarted') THEN 1 ELSE 0 END), 0) as running,
 			AVG(CASE WHEN j.duration_ms IS NOT NULL THEN j.duration_ms ELSE NULL END) as avg_duration_ms
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id

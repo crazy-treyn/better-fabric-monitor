@@ -209,10 +209,28 @@ type ItemStats struct {
 	ItemID        string  `json:"itemId"`
 	ItemName      string  `json:"itemName"`
 	ItemType      string  `json:"itemType"`
+	WorkspaceID   string  `json:"workspaceId"`
+	WorkspaceName string  `json:"workspaceName"`
 	TotalJobs     int     `json:"totalJobs"`
 	Successful    int     `json:"successful"`
 	Failed        int     `json:"failed"`
 	Running       int     `json:"running"`
 	SuccessRate   float64 `json:"successRate"`
+	AvgDurationMs float64 `json:"avgDurationMs"`
+}
+
+// DailyItemStats represents job statistics for items on a specific date
+type DailyItemStats struct {
+	ItemID        string  `json:"itemId"`
+	ItemName      string  `json:"itemName"`
+	ItemType      string  `json:"itemType"`
+	WorkspaceID   string  `json:"workspaceId"`
+	WorkspaceName string  `json:"workspaceName"`
+	TotalJobs     int     `json:"totalJobs"`
+	Successful    int     `json:"successful"`
+	Failed        int     `json:"failed"`
+	SuccessRate   float64 `json:"successRate"`
+	MinDurationMs int64   `json:"minDurationMs"`
+	MaxDurationMs int64   `json:"maxDurationMs"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }

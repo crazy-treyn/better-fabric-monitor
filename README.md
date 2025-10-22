@@ -15,8 +15,8 @@ A desktop application for monitoring Microsoft Fabric job executions, built with
 
 ## Prerequisites
 
-- **Go 1.20+** - [Download](https://go.dev/dl/)
-- **Node.js 16+** - [Download](https://nodejs.org/)
+- **Go 1.24+** - [Download](https://go.dev/dl/)
+- **Node.js 24+** - [Download](https://nodejs.org/)
 - **Wails CLI** - `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 - **WebView2 Runtime** - Pre-installed on Windows 10/11
 - **GCC Compiler** - [TDM-GCC](https://jmeubank.github.io/tdm-gcc/) or [MinGW-w64](https://www.mingw-w64.org/)
@@ -106,7 +106,7 @@ better-fabric-monitor/
 
 ## Technology Stack
 
-- **Backend**: Go 1.20+ with Wails v2
+- **Backend**: Go 1.24+ with Wails v2
 - **Frontend**: Svelte + Vite + Tailwind CSS
 - **Database**: DuckDB (embedded analytical database)
 - **Authentication**: Azure AD device code flow
