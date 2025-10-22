@@ -543,10 +543,10 @@ func (a *App) GetJobs() []map[string]interface{} {
 	}
 
 	// After all jobs are persisted, fetch activity runs for completed DataPipeline jobs
-	// This runs in a background goroutine to avoid blocking the UI response
+	// This blocks until enrichment completes to ensure child executions are available when UI loads
 	// We do this AFTER the persistence block to ensure all jobs are committed to the database
 	if a.db != nil && len(jobs) > 0 {
-		go a.enrichPipelineJobsWithActivityRuns()
+		a.enrichPipelineJobsWithActivityRuns()
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
@@ -920,6 +920,33 @@ func (a *App) GetItemStatsByJobType(itemType string, days int) map[string]interf
 	return map[string]interface{}{
 		"items": itemStats,
 		"days":  days,
+	}
+}
+
+// GetItemStatsByDate returns item-level statistics for a specific date with optional filters
+func (a *App) GetItemStatsByDate(date string, workspaceIDs []string, itemTypes []string, itemNameSearch string) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	if date == "" {
+		return map[string]interface{}{
+			"error": "Date is required",
+		}
+	}
+
+	itemStats, err := a.db.GetItemStatsByDate(date, workspaceIDs, itemTypes, itemNameSearch)
+	if err != nil {
+		return map[string]interface{}{
+			"error": err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"items": itemStats,
+		"date":  date,
 	}
 }
 

@@ -15,6 +15,7 @@
     let jobTypeChartInstance = null;
     let selectedWorkspace = null;
     let selectedJobType = null;
+    let selectedDate = null;
     let drillDownData = null;
 
     // Filter states
@@ -128,6 +129,13 @@
                     mode: "index",
                     intersect: false,
                 },
+                onClick: (event, elements) => {
+                    if (elements.length > 0) {
+                        const index = elements[0].index;
+                        const date = analytics.dailyStats[index].date;
+                        handleDateDrillDown(date);
+                    }
+                },
                 plugins: {
                     legend: {
                         display: true,
@@ -145,6 +153,11 @@
                         bodyColor: "rgb(203, 213, 225)",
                         borderColor: "rgb(71, 85, 105)",
                         borderWidth: 1,
+                        callbacks: {
+                            afterBody: function () {
+                                return "\n\nClick to drill down";
+                            },
+                        },
                     },
                 },
                 scales: {
@@ -567,6 +580,7 @@
         try {
             selectedJobType = itemType;
             selectedWorkspace = null;
+            selectedDate = null;
             const result = await window.go.main.App.GetItemStatsByJobType(
                 itemType,
                 selectedDays,
@@ -583,9 +597,38 @@
         }
     }
 
+    async function handleDateDrillDown(date) {
+        try {
+            selectedDate = date;
+            selectedWorkspace = null;
+            selectedJobType = null;
+
+            // Convert Sets to arrays for Go
+            const workspaceIDsArray = Array.from(selectedWorkspaceIds);
+            const itemTypesArray = Array.from(selectedItemTypes);
+
+            const result = await window.go.main.App.GetItemStatsByDate(
+                date,
+                workspaceIDsArray,
+                itemTypesArray,
+                itemNameSearch,
+            );
+            if (result.error) {
+                console.error("Error loading date items:", result.error);
+                error = result.error;
+                return;
+            }
+            drillDownData = result.items;
+        } catch (err) {
+            console.error("Failed to drill down into date:", err);
+            error = err.message || "Failed to load date items";
+        }
+    }
+
     function closeDrillDown() {
         selectedWorkspace = null;
         selectedJobType = null;
+        selectedDate = null;
         drillDownData = null;
     }
 
@@ -638,6 +681,58 @@
             showItemTypeDropdown = false;
         }
     }
+
+    // Calculate grand totals for drill-down data
+    $: drillDownTotals = drillDownData
+        ? drillDownData.reduce(
+              (acc, item) => {
+                  acc.totalJobs += item.totalJobs || 0;
+                  acc.successful += item.successful || 0;
+                  acc.failed += item.failed || 0;
+
+                  // For date drill-down with min/max duration
+                  if (selectedDate && item.minDurationMs !== undefined) {
+                      if (
+                          acc.minDurationMs === null ||
+                          item.minDurationMs < acc.minDurationMs
+                      ) {
+                          acc.minDurationMs = item.minDurationMs;
+                      }
+                      if (
+                          acc.maxDurationMs === null ||
+                          item.maxDurationMs > acc.maxDurationMs
+                      ) {
+                          acc.maxDurationMs = item.maxDurationMs;
+                      }
+                  }
+
+                  // Calculate weighted average for avgDurationMs
+                  if (item.avgDurationMs && item.totalJobs) {
+                      acc.totalDuration += item.avgDurationMs * item.totalJobs;
+                  }
+
+                  return acc;
+              },
+              {
+                  totalJobs: 0,
+                  successful: 0,
+                  failed: 0,
+                  minDurationMs: null,
+                  maxDurationMs: null,
+                  totalDuration: 0,
+                  get successRate() {
+                      return this.totalJobs > 0
+                          ? (this.successful / this.totalJobs) * 100
+                          : 0;
+                  },
+                  get avgDurationMs() {
+                      return this.totalJobs > 0
+                          ? this.totalDuration / this.totalJobs
+                          : 0;
+                  },
+              },
+          )
+        : null;
 
     $: hasData =
         analytics &&
@@ -1033,7 +1128,7 @@
                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
             >
                 <div
-                    class="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-slate-800 border border-slate-700 shadow-2xl"
+                    class="max-h-[90vh] w-full max-w-7xl overflow-auto rounded-lg bg-slate-800 border border-slate-700 shadow-2xl"
                 >
                     <!-- Modal Header -->
                     <div
@@ -1044,6 +1139,8 @@
                                 Items in {selectedWorkspace.name}
                             {:else if selectedJobType}
                                 {selectedJobType} Items
+                            {:else if selectedDate}
+                                Items on {formatDate(selectedDate)}
                             {/if}
                         </h2>
                         <button
@@ -1079,6 +1176,10 @@
                                         <tr>
                                             <th
                                                 class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-300"
+                                                >Workspace</th
+                                            >
+                                            <th
+                                                class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-300"
                                                 >Item</th
                                             >
                                             <th
@@ -1101,6 +1202,16 @@
                                                 class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-slate-300"
                                                 >Success Rate</th
                                             >
+                                            {#if selectedDate}
+                                                <th
+                                                    class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-slate-300"
+                                                    >Min Duration</th
+                                                >
+                                                <th
+                                                    class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-slate-300"
+                                                    >Max Duration</th
+                                                >
+                                            {/if}
                                             <th
                                                 class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-slate-300"
                                                 >Avg Duration</th
@@ -1110,6 +1221,16 @@
                                     <tbody class="divide-y divide-slate-700">
                                         {#each drillDownData as item}
                                             <tr class="hover:bg-slate-700/50">
+                                                <td class="px-4 py-3">
+                                                    <div
+                                                        class="text-sm text-slate-300 truncate"
+                                                        title={item.workspaceName}
+                                                    >
+                                                        {item.workspaceName ||
+                                                            item.workspaceId ||
+                                                            "N/A"}
+                                                    </div>
+                                                </td>
                                                 <td class="px-4 py-3">
                                                     <div
                                                         class="text-sm text-white truncate"
@@ -1146,6 +1267,22 @@
                                                         item.successRate,
                                                     )}
                                                 </td>
+                                                {#if selectedDate}
+                                                    <td
+                                                        class="px-4 py-3 text-right text-sm text-slate-300"
+                                                    >
+                                                        {formatDuration(
+                                                            item.minDurationMs,
+                                                        )}
+                                                    </td>
+                                                    <td
+                                                        class="px-4 py-3 text-right text-sm text-slate-300"
+                                                    >
+                                                        {formatDuration(
+                                                            item.maxDurationMs,
+                                                        )}
+                                                    </td>
+                                                {/if}
                                                 <td
                                                     class="px-4 py-3 text-right text-sm text-slate-300"
                                                 >
@@ -1156,6 +1293,67 @@
                                             </tr>
                                         {/each}
                                     </tbody>
+                                    <tfoot
+                                        class="bg-slate-700/50 border-t-2 border-slate-600"
+                                    >
+                                        <tr class="font-semibold">
+                                            <td
+                                                class="px-4 py-3 text-sm text-white"
+                                                colspan="3"
+                                            >
+                                                Grand Total
+                                            </td>
+                                            <td
+                                                class="px-4 py-3 text-center text-sm font-bold text-white"
+                                            >
+                                                {drillDownTotals?.totalJobs ||
+                                                    0}
+                                            </td>
+                                            <td
+                                                class="px-4 py-3 text-center text-sm font-bold text-green-400"
+                                            >
+                                                {drillDownTotals?.successful ||
+                                                    0}
+                                            </td>
+                                            <td
+                                                class="px-4 py-3 text-center text-sm font-bold text-red-400"
+                                            >
+                                                {drillDownTotals?.failed || 0}
+                                            </td>
+                                            <td
+                                                class="px-4 py-3 text-center text-sm font-bold text-blue-400"
+                                            >
+                                                {formatPercent(
+                                                    drillDownTotals?.successRate ||
+                                                        0,
+                                                )}
+                                            </td>
+                                            {#if selectedDate}
+                                                <td
+                                                    class="px-4 py-3 text-right text-sm font-bold text-slate-300"
+                                                >
+                                                    {formatDuration(
+                                                        drillDownTotals?.minDurationMs,
+                                                    )}
+                                                </td>
+                                                <td
+                                                    class="px-4 py-3 text-right text-sm font-bold text-slate-300"
+                                                >
+                                                    {formatDuration(
+                                                        drillDownTotals?.maxDurationMs,
+                                                    )}
+                                                </td>
+                                            {/if}
+                                            <td
+                                                class="px-4 py-3 text-right text-sm font-bold text-slate-300"
+                                            >
+                                                {formatDuration(
+                                                    drillDownTotals?.avgDurationMs ||
+                                                        0,
+                                                )}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
                                 </table>
                             </div>
                         {/if}
