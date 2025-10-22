@@ -6,9 +6,17 @@ mode: agent
 ## Objective
 Update the Better Fabric Monitor application to a new version number and create a git tag that will trigger an automated build and release via GitHub Actions.
 
+## ⚠️ Important Prerequisites
+- **Must be on `main` branch** - The release workflow only builds from `main`
+- If you're on a feature branch, merge to `main` first before proceeding
+
 ## Instructions for LLM Agent
 
-**Before starting, ask the user for the following information:**
+**Before starting, verify:**
+1. Current branch is `main` (run `git branch --show-current`)
+2. All changes are committed and pushed to `main`
+
+**Then ask the user for the following information:**
 
 1. **New version number** (format: X.Y.Z, e.g., 0.3.0, 1.0.0, etc.)
 2. **Release description** (brief summary of what's new in this version for the git tag message)
@@ -59,9 +67,11 @@ git tag -a v[NEW_VERSION] -m "Release v[NEW_VERSION] - [RELEASE_DESCRIPTION]"
 Push the version changes and tag to trigger the automated build:
 
 ```powershell
-git push origin [CURRENT_BRANCH]
+git push origin main
 git push origin v[NEW_VERSION]
 ```
+
+**Important:** The tag must be pushed from the `main` branch for the release workflow to trigger.
 
 **GitHub Actions will automatically:**
 1. Build the production executable with the new version embedded
