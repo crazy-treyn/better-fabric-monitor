@@ -110,6 +110,8 @@ func (db *Database) initSchema() error {
 		duration_ms BIGINT,
 		failure_reason VARCHAR,
 		invoker_type VARCHAR,
+		root_activity_id VARCHAR,
+		activity_runs JSON,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);

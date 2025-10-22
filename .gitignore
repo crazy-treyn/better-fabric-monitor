@@ -1,6 +1,7 @@
 # Build outputs
 build/
 frontend/dist
+*.exe
 
 # Dependencies
 node_modules

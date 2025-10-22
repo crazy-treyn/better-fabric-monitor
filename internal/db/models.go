@@ -1,6 +1,9 @@
 package db
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Workspace represents a Fabric workspace
 type Workspace struct {
@@ -23,23 +26,71 @@ type Item struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+// ActivityRun represents a single activity execution within a pipeline
+type ActivityRun struct {
+	PipelineID              string                 `json:"pipelineId"`
+	PipelineRunID           string                 `json:"pipelineRunId"`
+	ActivityName            string                 `json:"activityName"`
+	ActivityType            string                 `json:"activityType"`
+	ActivityRunID           string                 `json:"activityRunId"`
+	Status                  string                 `json:"status"`
+	ActivityRunStart        string                 `json:"activityRunStart"`
+	ActivityRunEnd          string                 `json:"activityRunEnd"`
+	DurationInMs            int64                  `json:"durationInMs"`
+	Input                   map[string]interface{} `json:"input"`
+	Output                  map[string]interface{} `json:"output"`
+	Error                   ActivityError          `json:"error"`
+	RetryAttempt            *int                   `json:"retryAttempt"`
+	IterationHash           string                 `json:"iterationHash"`
+	UserProperties          map[string]interface{} `json:"userProperties"`
+	RecoveryStatus          string                 `json:"recoveryStatus"`
+	IntegrationRuntimeNames []string               `json:"integrationRuntimeNames"`
+	ExecutionDetails        map[string]interface{} `json:"executionDetails"`
+}
+
+// ActivityError represents an error in an activity run
+type ActivityError struct {
+	ErrorCode   string          `json:"errorCode"`
+	Message     string          `json:"message"`
+	FailureType string          `json:"failureType"`
+	Target      string          `json:"target"`
+	Details     json.RawMessage `json:"details"` // Can be string or array depending on error type
+}
+
 // JobInstance represents a job execution instance
 type JobInstance struct {
-	ID              string     `json:"id"`
-	WorkspaceID     string     `json:"workspaceId"`
-	ItemID          string     `json:"itemId"`
-	JobType         string     `json:"jobType"`
-	Status          string     `json:"status"`
-	StartTime       time.Time  `json:"startTime"`
-	EndTime         *time.Time `json:"endTime,omitempty"`
-	DurationMs      *int64     `json:"durationMs,omitempty"`
-	FailureReason   *string    `json:"failureReason,omitempty"`
-	InvokerType     *string    `json:"invokerType,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	ItemDisplayName *string    `json:"itemDisplayName,omitempty"` // Joined from items table
-	ItemType        *string    `json:"itemType,omitempty"`        // Joined from items table
-	WorkspaceName   *string    `json:"workspaceName,omitempty"`   // Joined from workspaces table
+	ID              string        `json:"id"`
+	WorkspaceID     string        `json:"workspaceId"`
+	ItemID          string        `json:"itemId"`
+	JobType         string        `json:"jobType"`
+	Status          string        `json:"status"`
+	StartTime       time.Time     `json:"startTime"`
+	EndTime         *time.Time    `json:"endTime,omitempty"`
+	DurationMs      *int64        `json:"durationMs,omitempty"`
+	FailureReason   *string       `json:"failureReason,omitempty"`
+	InvokerType     *string       `json:"invokerType,omitempty"`
+	RootActivityID  *string       `json:"rootActivityId,omitempty"` // Root activity id to trace requests across services
+	ActivityRuns    []ActivityRun `json:"activityRuns,omitempty"`   // Activity runs data for pipelines
+	ActivityCount   *int          `json:"activityCount,omitempty"`  // Count of activities
+	CreatedAt       time.Time     `json:"createdAt"`
+	UpdatedAt       time.Time     `json:"updatedAt"`
+	ItemDisplayName *string       `json:"itemDisplayName,omitempty"` // Joined from items table
+	ItemType        *string       `json:"itemType,omitempty"`        // Joined from items table
+	WorkspaceName   *string       `json:"workspaceName,omitempty"`   // Joined from workspaces table
+}
+
+// ChildExecution represents a child pipeline or notebook execution
+type ChildExecution struct {
+	ActivityRunID string     `json:"activityRunId"`
+	ActivityName  string     `json:"activityName"`
+	ActivityType  string     `json:"activityType"`
+	Status        string     `json:"status"`
+	StartTime     *time.Time `json:"activityRunStart"` // Match API field name
+	EndTime       *time.Time `json:"activityRunEnd"`   // Match API field name
+	DurationMs    *int64     `json:"durationMs"`
+	ErrorMessage  *string    `json:"errorMessage"`
+	PipelineID    string     `json:"pipelineId"`
+	HasChildren   bool       `json:"hasChildren"` // For future recursive expansion
 }
 
 // PipelineRun represents a pipeline run

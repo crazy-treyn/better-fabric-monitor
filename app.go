@@ -517,6 +517,11 @@ func (a *App) GetJobs() []map[string]interface{} {
 				dbJob.FailureReason = &failureReason
 			}
 
+			// Root activity ID
+			if rootActivityId, ok := job["rootActivityId"].(string); ok && rootActivityId != "" {
+				dbJob.RootActivityID = &rootActivityId
+			}
+
 			dbJobs = append(dbJobs, dbJob)
 		}
 
@@ -535,6 +540,13 @@ func (a *App) GetJobs() []map[string]interface{} {
 				}
 			}
 		}
+	}
+
+	// After all jobs are persisted, fetch activity runs for completed DataPipeline jobs
+	// This runs in a background goroutine to avoid blocking the UI response
+	// We do this AFTER the persistence block to ensure all jobs are committed to the database
+	if a.db != nil && len(jobs) > 0 {
+		go a.enrichPipelineJobsWithActivityRuns()
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
@@ -623,6 +635,9 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		}
 		if job.FailureReason != nil {
 			jobMap["failureReason"] = *job.FailureReason
+		}
+		if job.RootActivityID != nil {
+			jobMap["rootActivityId"] = *job.RootActivityID
 		}
 
 		result = append(result, jobMap)
@@ -905,6 +920,232 @@ func (a *App) GetItemStatsByJobType(itemType string, days int) map[string]interf
 	return map[string]interface{}{
 		"items": itemStats,
 		"days":  days,
+	}
+}
+
+// enrichPipelineJobsWithActivityRuns fetches activity runs for completed pipeline jobs
+// This runs in the background to avoid blocking the main sync process
+// Uses parallel processing with worker pools for scalability
+func (a *App) enrichPipelineJobsWithActivityRuns() {
+	if a.db == nil {
+		return
+	}
+
+	// Get all completed pipeline jobs without activity runs (removed LIMIT)
+	query := `
+		SELECT j.id, j.workspace_id, j.start_time, j.end_time
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE i.type = 'DataPipeline'
+			AND j.end_time IS NOT NULL
+			AND j.activity_runs IS NULL
+		ORDER BY j.start_time DESC
+	`
+
+	rows, err := a.db.GetConnection().Query(query)
+	if err != nil {
+		fmt.Printf("Failed to query pipeline jobs for activity runs: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	type pipelineJob struct {
+		ID          string
+		WorkspaceID string
+		StartTime   time.Time
+		EndTime     time.Time
+	}
+
+	var jobs []pipelineJob
+	for rows.Next() {
+		var job pipelineJob
+		if err := rows.Scan(&job.ID, &job.WorkspaceID, &job.StartTime, &job.EndTime); err != nil {
+			fmt.Printf("Failed to scan pipeline job: %v\n", err)
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+
+	if len(jobs) == 0 {
+		return
+	}
+
+	fmt.Printf("Fetching activity runs for %d pipeline jobs in parallel...\n", len(jobs))
+	startTime := time.Now()
+
+	// Create worker pool for parallel processing (limit to 20 concurrent requests)
+	pool := fabric.NewWorkerPool(20)
+
+	// Channel to collect results
+	type jobResult struct {
+		jobID         string
+		activityRuns  []db.ActivityRun
+		err           error
+		activityCount int
+	}
+	results := make(chan jobResult, len(jobs))
+
+	// Process each job in parallel
+	for _, job := range jobs {
+		job := job // Capture for goroutine
+
+		pool.Submit(a.ctx, func() error {
+			result := jobResult{jobID: job.ID}
+
+			// Add some buffer time before and after the job run
+			startTime := job.StartTime.Add(-1 * time.Minute)
+			endTime := job.EndTime.Add(1 * time.Minute)
+
+			activityRuns, err := a.fabricClient.QueryActivityRuns(a.ctx, job.WorkspaceID, job.ID, startTime, endTime)
+			if err != nil {
+				result.err = err
+				results <- result
+				return nil
+			}
+
+			result.activityCount = len(activityRuns)
+
+			// Convert fabric.ActivityRun to db.ActivityRun
+			dbActivityRuns := make([]db.ActivityRun, len(activityRuns))
+			for i, ar := range activityRuns {
+				dbActivityRuns[i] = db.ActivityRun{
+					PipelineID:              ar.PipelineID,
+					PipelineRunID:           ar.PipelineRunID,
+					ActivityName:            ar.ActivityName,
+					ActivityType:            ar.ActivityType,
+					ActivityRunID:           ar.ActivityRunID,
+					Status:                  ar.Status,
+					ActivityRunStart:        ar.ActivityRunStart,
+					ActivityRunEnd:          ar.ActivityRunEnd,
+					DurationInMs:            ar.DurationInMs,
+					Input:                   ar.Input,
+					Output:                  ar.Output,
+					Error:                   db.ActivityError(ar.Error),
+					RetryAttempt:            ar.RetryAttempt,
+					IterationHash:           ar.IterationHash,
+					UserProperties:          ar.UserProperties,
+					RecoveryStatus:          ar.RecoveryStatus,
+					IntegrationRuntimeNames: ar.IntegrationRuntimeNames,
+					ExecutionDetails:        ar.ExecutionDetails,
+				}
+			}
+
+			result.activityRuns = dbActivityRuns
+			results <- result
+			return nil
+		})
+	}
+
+	// Wait for all jobs to complete
+	pool.Wait()
+	close(results)
+
+	// Process results and save to database
+	successCount := 0
+	errorCount := 0
+	totalActivities := 0
+
+	for result := range results {
+		if result.err != nil {
+			fmt.Printf("Failed to fetch activity runs for job %s: %v\n", result.jobID, result.err)
+			errorCount++
+			// Still mark as processed with empty array to avoid retrying
+			if err := a.db.UpdateJobInstanceActivityRuns(result.jobID, []db.ActivityRun{}); err != nil {
+				fmt.Printf("Failed to save empty activity runs for job %s: %v\n", result.jobID, err)
+			}
+			continue
+		}
+
+		if err := a.db.UpdateJobInstanceActivityRuns(result.jobID, result.activityRuns); err != nil {
+			fmt.Printf("Failed to save activity runs for job %s: %v\n", result.jobID, err)
+			errorCount++
+			continue
+		}
+
+		successCount++
+		totalActivities += result.activityCount
+	}
+
+	elapsed := time.Since(startTime)
+	fmt.Printf("Activity runs sync completed in %v\n", elapsed)
+	fmt.Printf("Successfully fetched activity runs for %d/%d pipeline jobs (%d activities, %d errors)\n",
+		successCount, len(jobs), totalActivities, errorCount)
+}
+
+// GetJobInstanceWithActivities retrieves a job instance with its activity runs
+func (a *App) GetJobInstanceWithActivities(jobID string) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	job, err := a.db.GetJobInstanceWithActivities(jobID)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("Failed to get job: %v", err),
+		}
+	}
+
+	return map[string]interface{}{
+		"job": job,
+	}
+}
+
+// GetChildExecutions retrieves child pipeline and notebook executions for a job
+func (a *App) GetChildExecutions(jobID string) map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	children, err := a.db.GetChildExecutions(jobID)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("Failed to get child executions: %v", err),
+		}
+	}
+
+	return map[string]interface{}{
+		"children": children,
+		"count":    len(children),
+	}
+}
+
+// GetActivityRunsSample returns a sample of activity runs for debugging (first DataPipeline with activity runs)
+func (a *App) GetActivityRunsSample() map[string]interface{} {
+	if a.db == nil {
+		return map[string]interface{}{
+			"error": "Database not initialized",
+		}
+	}
+
+	query := `
+		SELECT j.id, i.display_name, j.activity_runs
+		FROM job_instances j
+		LEFT JOIN items i ON j.item_id = i.id
+		WHERE i.type = 'DataPipeline'
+			AND j.activity_runs IS NOT NULL
+			AND json_array_length(CAST(j.activity_runs AS JSON[])) > 0
+		LIMIT 1
+	`
+
+	var jobID string
+	var displayName string
+	var activityRunsJSON string
+
+	err := a.db.GetConnection().QueryRow(query).Scan(&jobID, &displayName, &activityRunsJSON)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("No pipeline jobs with activity runs found: %v", err),
+		}
+	}
+
+	return map[string]interface{}{
+		"jobID":        jobID,
+		"displayName":  displayName,
+		"activityRuns": activityRunsJSON,
 	}
 }
 
