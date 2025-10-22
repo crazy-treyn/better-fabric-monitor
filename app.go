@@ -1076,13 +1076,12 @@ func (a *App) enrichPipelineJobsWithActivityRuns() {
 		if result.err != nil {
 			fmt.Printf("Failed to fetch activity runs for job %s: %v\n", result.jobID, result.err)
 			errorCount++
-			// Still mark as processed with empty array to avoid retrying
-			if err := a.db.UpdateJobInstanceActivityRuns(result.jobID, []db.ActivityRun{}); err != nil {
-				fmt.Printf("Failed to save empty activity runs for job %s: %v\n", result.jobID, err)
-			}
+			// Do NOT mark as processed - leave activity_runs as NULL so it can be retried
+			// This allows the job to be re-enriched on the next sync
 			continue
 		}
 
+		// Save activity runs (even if empty array - this is a valid result)
 		if err := a.db.UpdateJobInstanceActivityRuns(result.jobID, result.activityRuns); err != nil {
 			fmt.Printf("Failed to save activity runs for job %s: %v\n", result.jobID, err)
 			errorCount++
