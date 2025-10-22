@@ -517,6 +517,11 @@ func (a *App) GetJobs() []map[string]interface{} {
 				dbJob.FailureReason = &failureReason
 			}
 
+			// Root activity ID
+			if rootActivityId, ok := job["rootActivityId"].(string); ok && rootActivityId != "" {
+				dbJob.RootActivityID = &rootActivityId
+			}
+
 			dbJobs = append(dbJobs, dbJob)
 		}
 
@@ -623,6 +628,9 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		}
 		if job.FailureReason != nil {
 			jobMap["failureReason"] = *job.FailureReason
+		}
+		if job.RootActivityID != nil {
+			jobMap["rootActivityId"] = *job.RootActivityID
 		}
 
 		result = append(result, jobMap)

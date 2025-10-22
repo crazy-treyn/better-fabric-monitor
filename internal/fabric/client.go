@@ -436,6 +436,10 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 							job["failureReason"] = failureReason
 						}
 
+						if instance.RootActivityID != "" {
+							job["rootActivityId"] = instance.RootActivityID
+						}
+
 						itemResult.Jobs = append(itemResult.Jobs, job)
 					}
 

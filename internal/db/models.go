@@ -35,6 +35,7 @@ type JobInstance struct {
 	DurationMs      *int64     `json:"durationMs,omitempty"`
 	FailureReason   *string    `json:"failureReason,omitempty"`
 	InvokerType     *string    `json:"invokerType,omitempty"`
+	RootActivityID  *string    `json:"rootActivityId,omitempty"` // Root activity id to trace requests across services
 	CreatedAt       time.Time  `json:"createdAt"`
 	UpdatedAt       time.Time  `json:"updatedAt"`
 	ItemDisplayName *string    `json:"itemDisplayName,omitempty"` // Joined from items table

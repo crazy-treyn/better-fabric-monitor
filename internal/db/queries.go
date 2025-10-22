@@ -103,13 +103,14 @@ func (db *Database) SaveJobInstances(jobs []JobInstance) error {
 	query := `
 		INSERT INTO job_instances (
 			id, workspace_id, item_id, job_type, status, start_time,
-			end_time, duration_ms, failure_reason, invoker_type, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, get_current_timestamp())
+			end_time, duration_ms, failure_reason, invoker_type, root_activity_id, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, get_current_timestamp())
 		ON CONFLICT(id) DO UPDATE SET
 			status = EXCLUDED.status,
 			end_time = EXCLUDED.end_time,
 			duration_ms = EXCLUDED.duration_ms,
 			failure_reason = EXCLUDED.failure_reason,
+			root_activity_id = EXCLUDED.root_activity_id,
 			updated_at = get_current_timestamp()
 	`
 
@@ -122,7 +123,7 @@ func (db *Database) SaveJobInstances(jobs []JobInstance) error {
 	for _, job := range jobs {
 		_, err = stmt.Exec(
 			job.ID, job.WorkspaceID, job.ItemID, job.JobType, job.Status, job.StartTime,
-			job.EndTime, job.DurationMs, job.FailureReason, job.InvokerType,
+			job.EndTime, job.DurationMs, job.FailureReason, job.InvokerType, job.RootActivityID,
 		)
 		if err != nil {
 			return err
@@ -182,7 +183,7 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 
 	query := fmt.Sprintf(`
 		SELECT j.id, j.workspace_id, j.item_id, j.job_type, j.status, j.start_time,
-			   j.end_time, j.duration_ms, j.failure_reason, j.invoker_type, j.created_at, j.updated_at,
+			   j.end_time, j.duration_ms, j.failure_reason, j.invoker_type, j.root_activity_id, j.created_at, j.updated_at,
 			   i.display_name as item_display_name, i.type as item_type,
 			   w.display_name as workspace_display_name
 		FROM job_instances j
@@ -205,10 +206,11 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		var itemDisplayName sql.NullString
 		var itemType sql.NullString
 		var workspaceDisplayName sql.NullString
+		var rootActivityID sql.NullString
 
 		err := rows.Scan(
 			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
-			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.CreatedAt, &job.UpdatedAt,
+			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &rootActivityID, &job.CreatedAt, &job.UpdatedAt,
 			&itemDisplayName, &itemType, &workspaceDisplayName,
 		)
 		if err != nil {
@@ -224,6 +226,9 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		}
 		if workspaceDisplayName.Valid {
 			job.WorkspaceName = &workspaceDisplayName.String
+		}
+		if rootActivityID.Valid {
+			job.RootActivityID = &rootActivityID.String
 		}
 
 		jobs = append(jobs, job)
@@ -749,7 +754,7 @@ func (db *Database) GetItemStatsByJobType(itemType string, days int) ([]ItemStat
 func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID string) ([]JobInstance, error) {
 	query := `
 		SELECT id, workspace_id, item_id, job_type, status, start_time,
-			   end_time, duration_ms, failure_reason, invoker_type, created_at, updated_at
+			   end_time, duration_ms, failure_reason, invoker_type, root_activity_id, created_at, updated_at
 		FROM job_instances
 		WHERE workspace_id = ? AND item_id = ? AND end_time IS NULL
 		ORDER BY start_time DESC
@@ -766,7 +771,7 @@ func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID stri
 		var job JobInstance
 		err := rows.Scan(
 			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
-			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.CreatedAt, &job.UpdatedAt,
+			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.RootActivityID, &job.CreatedAt, &job.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
