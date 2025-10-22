@@ -9,9 +9,11 @@
     let filterLevel = "all"; // all, INFO, WARNING, ERROR, DEBUG
     let searchText = "";
     let logsContainer;
+    let appVersion = "";
 
     onMount(async () => {
         await loadLogs();
+        await loadVersion();
         if (autoRefresh) {
             startAutoRefresh();
         }
@@ -20,6 +22,15 @@
     onDestroy(() => {
         stopAutoRefresh();
     });
+
+    async function loadVersion() {
+        try {
+            appVersion = await window.go.main.App.GetAppVersion();
+        } catch (error) {
+            console.error("Failed to load version:", error);
+            appVersion = "unknown";
+        }
+    }
 
     async function loadLogs() {
         try {
@@ -340,8 +351,13 @@
 
     <!-- Footer Stats -->
     <div class="mt-3 text-sm text-slate-400 flex items-center justify-between">
-        <div>
-            Showing {filteredLogs.length} of {logs.length} log entries
+        <div class="flex items-center gap-4">
+            <span>
+                Showing {filteredLogs.length} of {logs.length} log entries
+            </span>
+            <span class="text-xs text-slate-400">
+                • v{appVersion || "loading..."}
+            </span>
         </div>
         {#if autoRefresh}
             <div class="flex items-center gap-2">

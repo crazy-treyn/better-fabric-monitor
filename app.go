@@ -15,9 +15,9 @@ import (
 
 // LogEntry represents a single log entry
 type LogEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	Level     string    `json:"level"`
-	Message   string    `json:"message"`
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
 }
 
 // LogBuffer stores recent log entries in a circular buffer
@@ -43,7 +43,7 @@ func (lb *LogBuffer) Add(level, message string) {
 	defer lb.mutex.Unlock()
 
 	entry := LogEntry{
-		Timestamp: time.Now(),
+		Timestamp: time.Now().Format(time.RFC3339Nano),
 		Level:     level,
 		Message:   message,
 	}
@@ -157,6 +157,12 @@ func (a *App) startup(ctx context.Context) {
 			},
 			UI: config.UIConfig{
 				PrimaryColor: "#00BCF2",
+			},
+			App: config.AppConfig{
+				Name:     "Better Fabric Monitor",
+				Version:  "0.2.0",
+				LogLevel: "info",
+				Debug:    false,
 			},
 		}
 	}
@@ -1300,6 +1306,14 @@ func (a *App) ClearLogs() {
 		logBuffer.Clear()
 		Log("Logs cleared\n")
 	}
+}
+
+// GetAppVersion returns the application version from config
+func (a *App) GetAppVersion() string {
+	if a.config != nil && a.config.App.Version != "" {
+		return a.config.App.Version
+	}
+	return "0.2.0" // Fallback version
 }
 
 // Greet returns a greeting for the given name (legacy method)
