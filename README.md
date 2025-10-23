@@ -201,5 +201,5 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## License
 
-See LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
