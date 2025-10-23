@@ -36,7 +36,9 @@ jobs:
         id: cache-wails
         uses: actions/cache@v4
         with:
-          path: ~/go/bin/wails
+          path: |
+            ~\go\bin\wails.exe
+            ~\AppData\Local\Wails
           key: ${{ runner.os }}-wails-${{ hashFiles('go.mod') }}
           restore-keys: |
             ${{ runner.os }}-wails-
