@@ -66,7 +66,7 @@
                         type="text"
                         bind:value={tenantId}
                         on:keypress={handleKeyPress}
-                        placeholder="Enter your Azure tenant ID (e.g., contoso.onmicrosoft.com or GUID)"
+                        placeholder="Enter your Azure tenant ID (GUID)"
                         class="w-full px-3 py-2 border border-slate-600 rounded-md shadow-sm bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                         disabled={isLoading}
                         required
