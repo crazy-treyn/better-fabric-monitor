@@ -7,7 +7,8 @@ export const authStore = writable({
     tenantId: '',
     error: null,
     deviceCode: null,
-    isWaitingForCode: false
+    isWaitingForCode: false,
+    offlineMode: false
 });
 
 // Auth actions
@@ -101,11 +102,33 @@ export const authActions = {
                 isAuthenticated: false,
                 user: null,
                 tenantId: '',
-                error: null
+                error: null,
+                deviceCode: null,
+                isWaitingForCode: false,
+                offlineMode: false
             });
         } catch (error) {
             console.error('Logout error:', error);
         }
+    },
+
+    continueOffline() {
+        authStore.update(state => ({
+            ...state,
+            offlineMode: true,
+            isAuthenticated: true, // Mark as "authenticated" for UI purposes
+            error: null,
+            deviceCode: null,
+            isWaitingForCode: false
+        }));
+    },
+
+    exitOfflineMode() {
+        authStore.update(state => ({
+            ...state,
+            offlineMode: false,
+            isAuthenticated: false
+        }));
     },
 
     async checkAuth() {

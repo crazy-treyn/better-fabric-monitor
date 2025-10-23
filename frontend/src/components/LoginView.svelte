@@ -183,6 +183,28 @@
                 </button>
             </form>
 
+            <!-- Offline Mode Option -->
+            <div class="mt-4">
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-slate-600"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-slate-800 text-slate-400">or</span>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    on:click={() => authActions.continueOffline()}
+                    class="mt-4 w-full flex justify-center py-2 px-4 border border-slate-600 rounded-md shadow-sm text-sm font-medium text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors"
+                >
+                    Continue Without Sign In
+                </button>
+                <p class="mt-2 text-xs text-slate-400 text-center">
+                    View cached data without connecting to Microsoft Fabric
+                </p>
+            </div>
+
             <!-- Help Text -->
             <div class="mt-6 text-center">
                 <p class="text-sm text-slate-400">

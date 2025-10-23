@@ -331,6 +331,37 @@ func (a *App) Logout() error {
 	return nil
 }
 
+// ensureValidToken checks if the current token is valid and refreshes if needed
+// Returns error if token refresh fails (requires re-authentication)
+func (a *App) ensureValidToken() error {
+	// If no auth manager, cannot proceed
+	if a.auth == nil {
+		return fmt.Errorf("authentication not initialized")
+	}
+
+	// Check if token exists and is not expired (5-minute buffer)
+	if a.currentToken != nil && time.Now().Before(a.currentToken.ExpiresAt.Add(-5*time.Minute)) {
+		// Token is still valid
+		return nil
+	}
+
+	Log("Token expired or about to expire, refreshing...\n")
+
+	// Try to refresh token silently
+	token, err := a.auth.GetToken(a.ctx)
+	if err != nil {
+		Log("ERROR: Token refresh failed: %v\n", err)
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	// Update token and recreate Fabric client
+	a.currentToken = token
+	a.fabricClient = fabric.NewClient(token.AccessToken)
+	Log("Token refreshed successfully, expires at: %s\n", token.ExpiresAt.Format(time.RFC3339))
+
+	return nil
+}
+
 // IsAuthenticated checks if user is authenticated
 func (a *App) IsAuthenticated() bool {
 	if a.auth != nil {
@@ -350,27 +381,32 @@ func (a *App) GetUserInfo() map[string]interface{} {
 
 // GetWorkspaces returns available workspaces
 func (a *App) GetWorkspaces() []map[string]interface{} {
-	if a.fabricClient == nil {
-		Log("Fabric client not initialized, checking cache...")
-		// Try to load from cache first
+	// Check and refresh token if needed
+	if err := a.ensureValidToken(); err != nil {
+		Log("Authentication required: %v\n", err)
+		// Check if we have cached data
 		cachedWorkspaces := a.GetWorkspacesFromCache()
-		if len(cachedWorkspaces) > 0 {
-			Log("Loaded %d workspaces from cache\n", len(cachedWorkspaces))
-			return cachedWorkspaces
+		hasCachedData := len(cachedWorkspaces) > 0
+
+		if hasCachedData {
+			Log("Loaded %d workspaces from cache (authentication expired)\n", len(cachedWorkspaces))
+			// Return cached data with error flag
+			return append([]map[string]interface{}{
+				{
+					"error":                 "authentication_required",
+					"message":               "Your session has expired. Please sign in again or continue with cached data.",
+					"cached_data_available": true,
+					"_is_error_marker":      true, // Special flag so frontend can filter this out
+				},
+			}, cachedWorkspaces...)
 		}
 
-		// No cache, return mock data
-		Log("No cached workspaces, returning mock data")
+		// No cached data, return error only
 		return []map[string]interface{}{
 			{
-				"id":          "workspace-1",
-				"displayName": "Production Workspace",
-				"type":        "Workspace",
-			},
-			{
-				"id":          "workspace-2",
-				"displayName": "Development Workspace",
-				"type":        "Workspace",
+				"error":                 "authentication_required",
+				"message":               "Your session has expired. Please sign in again.",
+				"cached_data_available": false,
 			},
 		}
 	}
@@ -429,40 +465,32 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 
 // GetJobs returns recent jobs
 func (a *App) GetJobs() []map[string]interface{} {
-	if a.fabricClient == nil {
-		Log("Fabric client not initialized, returning mock data")
+	// Check and refresh token if needed
+	if err := a.ensureValidToken(); err != nil {
+		Log("Authentication required: %v\n", err)
+		// Check if we have cached data
+		cachedJobs := a.GetJobsFromCache()
+		hasCachedData := len(cachedJobs) > 0
+
+		if hasCachedData {
+			Log("Loaded %d jobs from cache (authentication expired)\n", len(cachedJobs))
+			// Return cached data with error flag
+			return append([]map[string]interface{}{
+				{
+					"error":                 "authentication_required",
+					"message":               "Your session has expired. Please sign in again or continue with cached data.",
+					"cached_data_available": true,
+					"_is_error_marker":      true, // Special flag so frontend can filter this out
+				},
+			}, cachedJobs...)
+		}
+
+		// No cached data, return error only
 		return []map[string]interface{}{
 			{
-				"id":              "job-1",
-				"workspaceId":     "workspace-1",
-				"itemId":          "pipeline-1",
-				"itemDisplayName": "Daily ETL Pipeline",
-				"jobType":         "Pipeline",
-				"status":          "Completed",
-				"startTime":       time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
-				"endTime":         time.Now().Add(-50 * time.Minute).Format(time.RFC3339),
-				"durationMs":      600000,
-			},
-			{
-				"id":              "job-2",
-				"workspaceId":     "workspace-1",
-				"itemId":          "notebook-1",
-				"itemDisplayName": "Data Analysis Notebook",
-				"jobType":         "Notebook",
-				"status":          "Failed",
-				"startTime":       time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
-				"endTime":         time.Now().Add(-1*time.Hour - 30*time.Minute).Format(time.RFC3339),
-				"durationMs":      5400000,
-				"failureReason":   "Connection timeout",
-			},
-			{
-				"id":              "job-3",
-				"workspaceId":     "workspace-2",
-				"itemId":          "pipeline-2",
-				"itemDisplayName": "Test Pipeline",
-				"jobType":         "Pipeline",
-				"status":          "Running",
-				"startTime":       time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+				"error":                 "authentication_required",
+				"message":               "Your session has expired. Please sign in again.",
+				"cached_data_available": false,
 			},
 		}
 	}
