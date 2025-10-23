@@ -208,8 +208,8 @@
             <!-- Help Text -->
             <div class="mt-6 text-center">
                 <p class="text-sm text-slate-400">
-                    This app requires Fabric.ReadWrite.All permissions in your
-                    Azure app registration.
+                    This app requires Fabric.ReadWrite.All permissions with your
+                    Entra ID account.
                 </p>
             </div>
         </div>
