@@ -71,10 +71,6 @@
                         disabled={isLoading}
                         required
                     />
-                    <p class="mt-1 text-sm text-slate-400">
-                        You can find this in your Azure portal under Azure
-                        Active Directory → Properties
-                    </p>
                 </div>
 
                 {#if $authStore.error}
