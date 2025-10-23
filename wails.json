@@ -13,7 +13,7 @@
   "info": {
     "companyName": "Trey",
     "productName": "Better Fabric Monitor",
-    "productVersion": "0.2.0",
+    "productVersion": "0.2.1",
     "copyright": "Copyright © 2025 Trey",
     "comments": "A desktop monitoring tool for Microsoft Fabric. Built using Wails (https://wails.io)"
   }
