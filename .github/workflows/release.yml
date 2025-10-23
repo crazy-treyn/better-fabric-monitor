@@ -92,11 +92,11 @@ jobs:
                ```
             3. Run the application
             
-          ## Prerequisites
-          
-          - Windows 10/11 with WebView2 Runtime (pre-installed on modern Windows)
-        draft: true
-        prerelease: true
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ## Prerequisites
+            
+            - Windows 10/11 with WebView2 Runtime (pre-installed on modern Windows)
+          draft: true
+          prerelease: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
