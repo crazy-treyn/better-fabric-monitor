@@ -20,6 +20,10 @@
     let hasLoadedData = false;
     let lastSyncTime = "";
 
+    // Auth error state
+    let authError = null;
+    let showAuthErrorModal = false;
+
     // Expanded job state for hierarchical view
     let expandedJobs = new Set();
     let jobChildrenCache = new Map(); // Cache child executions per job
@@ -69,18 +73,58 @@
     async function loadData() {
         try {
             isLoading = true;
-            // Load fresh data from Fabric API (also persists to cache)
-            workspaces = (await window.go.main.App.GetWorkspaces()) || [];
-            jobs = (await window.go.main.App.GetJobs()) || [];
-            hasLoadedData = true;
+            authError = null; // Clear any previous errors
 
-            // Update last sync time
-            lastSyncTime = new Date().toISOString();
+            // Load fresh data from Fabric API (also persists to cache)
+            const freshWorkspaces =
+                (await window.go.main.App.GetWorkspaces()) || [];
+            const freshJobs = (await window.go.main.App.GetJobs()) || [];
+
+            // Check for authentication errors
+            const workspaceError = freshWorkspaces.find(
+                (w) => w.error === "authentication_required",
+            );
+            const jobError = freshJobs.find(
+                (j) => j.error === "authentication_required",
+            );
+
+            if (workspaceError || jobError) {
+                const error = workspaceError || jobError;
+                authError = error;
+                showAuthErrorModal = true;
+
+                // Filter out error markers and use cached data if available
+                workspaces = freshWorkspaces.filter((w) => !w._is_error_marker);
+                jobs = freshJobs.filter((j) => !j._is_error_marker);
+
+                console.log("Authentication expired, showing cached data");
+            } else {
+                // Success - use fresh data
+                workspaces = freshWorkspaces;
+                jobs = freshJobs;
+                hasLoadedData = true;
+
+                // Update last sync time
+                lastSyncTime = new Date().toISOString();
+            }
         } catch (error) {
             console.error("Failed to load data:", error);
         } finally {
             isLoading = false;
         }
+    }
+
+    function handleAuthError_SignOut() {
+        showAuthErrorModal = false;
+        authError = null;
+        handleLogout();
+    }
+
+    function handleAuthError_ContinueOffline() {
+        showAuthErrorModal = false;
+        authError = null;
+        // Keep the cached data that's already loaded
+        console.log("Continuing with cached data");
     }
 
     async function handleLogout() {
@@ -295,6 +339,38 @@
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={stopResize} />
 
+<!-- Auth Error Modal -->
+{#if showAuthErrorModal && authError}
+    <div
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+    >
+        <div
+            class="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 border border-slate-700"
+        >
+            <h2 class="text-xl font-bold text-white mb-4">Session Expired</h2>
+            <p class="text-slate-300 mb-6">
+                {authError.message}
+            </p>
+            <div class="flex gap-3">
+                <button
+                    on:click={handleAuthError_SignOut}
+                    class="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+                >
+                    Sign Out & Re-authenticate
+                </button>
+                {#if authError.cached_data_available}
+                    <button
+                        on:click={handleAuthError_ContinueOffline}
+                        class="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors"
+                    >
+                        Continue with Cached Data
+                    </button>
+                {/if}
+            </div>
+        </div>
+    </div>
+{/if}
+
 <div class="h-screen flex flex-col bg-slate-900">
     <!-- Header -->
     <header class="bg-slate-800 border-b border-slate-700 px-6 py-4">
@@ -343,13 +419,15 @@
                             ).toLocaleString()}
                         {/if}
                     </div>
-                    <button
-                        on:click={loadData}
-                        class="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
-                        disabled={isLoading}
-                    >
-                        {isLoading ? "Loading..." : "Refresh from API"}
-                    </button>
+                    {#if !$authStore.offlineMode}
+                        <button
+                            on:click={loadData}
+                            class="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+                            disabled={isLoading}
+                        >
+                            {isLoading ? "Loading..." : "Refresh from API"}
+                        </button>
+                    {/if}
                 {/if}
                 <button
                     on:click={handleLogout}
@@ -360,6 +438,41 @@
             </div>
         </div>
     </header>
+
+    <!-- Offline Mode Banner -->
+    {#if $authStore.offlineMode}
+        <div class="bg-yellow-900/50 border-b border-yellow-700 px-6 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <svg
+                        class="h-5 w-5 text-yellow-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                    </svg>
+                    <span class="text-yellow-200 text-sm font-medium">
+                        Viewing cached data only. Sign in to refresh from API.
+                    </span>
+                </div>
+                <button
+                    on:click={async () => {
+                        await authActions.exitOfflineMode();
+                        // Redirect will happen via App.svelte watching authStore
+                    }}
+                    class="px-4 py-1.5 text-sm bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors"
+                >
+                    Sign In
+                </button>
+            </div>
+        </div>
+    {/if}
 
     <!-- Main Content -->
     <main class="flex-1 overflow-hidden">

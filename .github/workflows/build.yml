@@ -6,9 +6,7 @@ on:
       - main
   push:
     branches:
-      - '**'
-    tags-ignore:
-      - '**'
+      - main
 
 jobs:
   build-windows:
