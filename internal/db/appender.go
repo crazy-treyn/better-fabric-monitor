@@ -223,8 +223,8 @@ func appendJobInstances(driverConn driver.Conn, jobs []JobInstance) error {
 			invokerType,
 			rootActivityID,
 			activityRuns,
-			job.CreatedAt,
-			job.UpdatedAt,
+			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append job instance %s: %w", job.ID, err)
@@ -365,8 +365,8 @@ func appendNotebookSessions(driverConn driver.Conn, sessions []NotebookSession) 
 			consumerIdentityID,
 			runtimeVersion,
 			isHighConcurrency,
-			s.CreatedAt,
-			s.UpdatedAt,
+			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append notebook session %s: %w", s.LivyID, err)
@@ -404,8 +404,8 @@ func appendWorkspaces(driverConn driver.Conn, workspaces []Workspace) error {
 			ws.DisplayName,
 			ws.Type,
 			description,
-			ws.CreatedAt,
-			ws.UpdatedAt,
+			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append workspace %s: %w", ws.ID, err)
@@ -444,8 +444,8 @@ func appendItems(driverConn driver.Conn, items []Item) error {
 			item.DisplayName,
 			item.Type,
 			description,
-			item.CreatedAt,
-			item.UpdatedAt,
+			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append item %s: %w", item.ID, err)
