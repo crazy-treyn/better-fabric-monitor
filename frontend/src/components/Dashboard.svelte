@@ -722,7 +722,15 @@
                             <div
                                 class="bg-slate-800 rounded-lg overflow-hidden"
                             >
-                                <table class="w-full">
+                                <table class="w-full jobs-table">
+                                    <colgroup>
+                                        <col style="width: 4%;" />
+                                        <col style="width: 36%;" />
+                                        <col style="width: 16%;" />
+                                        <col style="width: 14%;" />
+                                        <col style="width: 16%;" />
+                                        <col style="width: 14%;" />
+                                    </colgroup>
                                     <thead class="bg-slate-700">
                                         <tr>
                                             <th
@@ -754,7 +762,9 @@
                                         {#each filteredJobs as job}
                                             <!-- Parent Job Row -->
                                             <tr class="hover:bg-slate-700/50">
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     {#if job.itemType === "DataPipeline"}
                                                         <button
                                                             on:click={() =>
@@ -817,11 +827,15 @@
                                                         </button>
                                                     {/if}
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 jobs-table__job-cell"
+                                                >
                                                     <div
-                                                        class="text-sm text-white font-medium flex items-center gap-2"
+                                                        class="text-sm text-white font-medium flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                     >
-                                                        <span>
+                                                        <span
+                                                            class="truncate jobs-table__job-title"
+                                                        >
                                                             {job.itemDisplayName ||
                                                                 job.itemId}
                                                         </span>
@@ -847,13 +861,15 @@
                                                         {/if}
                                                     </div>
                                                     <div
-                                                        class="text-xs text-slate-400"
+                                                        class="text-xs text-slate-400 truncate"
                                                     >
                                                         {job.workspaceName ||
                                                             job.workspaceId}
                                                     </div>
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     <div
                                                         class="text-sm text-slate-300"
                                                     >
@@ -865,7 +881,9 @@
                                                         {job.jobType}
                                                     </div>
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     <span
                                                         class="inline-flex px-2 py-1 text-xs font-semibold rounded-full {getStatusColor(
                                                             job.status,
@@ -876,12 +894,12 @@
                                                     </span>
                                                 </td>
                                                 <td
-                                                    class="px-4 py-3 text-sm text-slate-300"
+                                                    class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap"
                                                 >
                                                     {formatDate(job.startTime)}
                                                 </td>
                                                 <td
-                                                    class="px-4 py-3 text-sm text-slate-300"
+                                                    class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap"
                                                 >
                                                     {formatDuration(
                                                         job.durationMs,
@@ -896,7 +914,7 @@
                                                         class="bg-slate-800/50 hover:bg-slate-700/30"
                                                     >
                                                         <td
-                                                            class="px-4 py-2 text-right"
+                                                            class="px-4 py-2 text-right whitespace-nowrap"
                                                         >
                                                             {#if child.childJobInstanceId && child.activityType === "ExecutePipeline"}
                                                                 <button
@@ -950,18 +968,20 @@
                                                             {/if}
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 pl-8"
+                                                            class="px-4 py-2 pl-8 jobs-table__job-cell"
                                                         >
                                                             <div
-                                                                class="text-sm text-slate-300 flex items-center gap-2"
+                                                                class="text-sm text-slate-300 flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                             >
                                                                 <span
-                                                                    class="text-base"
+                                                                    class="text-base flex-shrink-0"
                                                                     >{getActivityIcon(
                                                                         child.activityType,
                                                                     )}</span
                                                                 >
-                                                                <span>
+                                                                <span
+                                                                    class="truncate jobs-table__job-title"
+                                                                >
                                                                     {child.activityName}
                                                                 </span>
                                                                 <FabricLink
@@ -970,7 +990,7 @@
                                                             </div>
                                                             {#if child.childPipelineName || child.childNotebookName}
                                                                 <div
-                                                                    class="text-xs text-slate-400 ml-7"
+                                                                    class="text-xs text-slate-400 ml-7 truncate"
                                                                 >
                                                                     {child.childPipelineName ||
                                                                         child.childNotebookName}
@@ -984,7 +1004,9 @@
                                                                 </div>
                                                             {/if}
                                                         </td>
-                                                        <td class="px-4 py-2">
+                                                        <td
+                                                            class="px-4 py-2 whitespace-nowrap"
+                                                        >
                                                             <div
                                                                 class="text-xs text-slate-400"
                                                             >
@@ -993,7 +1015,9 @@
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td class="px-4 py-2">
+                                                        <td
+                                                            class="px-4 py-2 whitespace-nowrap"
+                                                        >
                                                             <span
                                                                 class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full {getStatusColor(
                                                                     child.status,
@@ -1003,14 +1027,14 @@
                                                             </span>
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 text-xs text-slate-400"
+                                                            class="px-4 py-2 text-xs text-slate-400 whitespace-nowrap"
                                                         >
                                                             {formatDate(
                                                                 child.activityRunStart,
                                                             )}
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 text-xs text-slate-400"
+                                                            class="px-4 py-2 text-xs text-slate-400 whitespace-nowrap"
                                                         >
                                                             {formatDuration(
                                                                 child.durationMs,
@@ -1025,7 +1049,7 @@
                                                                 class="bg-slate-800/30 hover:bg-slate-700/20"
                                                             >
                                                                 <td
-                                                                    class="px-4 py-2 text-right"
+                                                                    class="px-4 py-2 text-right whitespace-nowrap"
                                                                 >
                                                                     <span
                                                                         class="text-slate-600 text-xs"
@@ -1033,18 +1057,20 @@
                                                                     >
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 pl-16"
+                                                                    class="px-4 py-2 pl-16 jobs-table__job-cell"
                                                                 >
                                                                     <div
-                                                                        class="text-sm text-slate-400 flex items-center gap-2"
+                                                                        class="text-sm text-slate-400 flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                                     >
                                                                         <span
-                                                                            class="text-base"
+                                                                            class="text-base flex-shrink-0"
                                                                             >{getActivityIcon(
                                                                                 grandchild.activityType,
                                                                             )}</span
                                                                         >
-                                                                        <span>
+                                                                        <span
+                                                                            class="truncate jobs-table__job-title"
+                                                                        >
                                                                             {grandchild.activityName}
                                                                         </span>
                                                                         <FabricLink
@@ -1053,7 +1079,7 @@
                                                                     </div>
                                                                     {#if grandchild.childPipelineName || grandchild.childNotebookName}
                                                                         <div
-                                                                            class="text-xs text-slate-500 ml-7"
+                                                                            class="text-xs text-slate-500 ml-7 truncate"
                                                                         >
                                                                             {grandchild.childPipelineName ||
                                                                                 grandchild.childNotebookName}
@@ -1061,7 +1087,7 @@
                                                                     {/if}
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2"
+                                                                    class="px-4 py-2 whitespace-nowrap"
                                                                 >
                                                                     <div
                                                                         class="text-xs text-slate-500"
@@ -1072,7 +1098,7 @@
                                                                     </div>
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2"
+                                                                    class="px-4 py-2 whitespace-nowrap"
                                                                 >
                                                                     <span
                                                                         class="inline-flex px-2 py-0.5 text-xs rounded-full {getStatusColor(
@@ -1083,14 +1109,14 @@
                                                                     </span>
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 text-xs text-slate-500"
+                                                                    class="px-4 py-2 text-xs text-slate-500 whitespace-nowrap"
                                                                 >
                                                                     {formatDate(
                                                                         grandchild.activityRunStart,
                                                                     )}
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 text-xs text-slate-500"
+                                                                    class="px-4 py-2 text-xs text-slate-500 whitespace-nowrap"
                                                                 >
                                                                     {formatDuration(
                                                                         grandchild.durationMs,
