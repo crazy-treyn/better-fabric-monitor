@@ -839,9 +839,6 @@
                                                             {job.itemDisplayName ||
                                                                 job.itemId}
                                                         </span>
-                                                        <FabricLink
-                                                            url={job.fabricUrl}
-                                                        />
                                                         {#if job.itemType === "DataPipeline" && jobChildrenCache.has(job.id)}
                                                             {@const childCount =
                                                                 jobChildrenCache.get(
@@ -859,6 +856,9 @@
                                                                 </span>
                                                             {/if}
                                                         {/if}
+                                                        <FabricLink
+                                                            url={job.fabricUrl}
+                                                        />
                                                     </div>
                                                     <div
                                                         class="text-xs text-slate-400 truncate"
