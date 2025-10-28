@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -21,6 +22,31 @@ func (db *Database) SaveWorkspace(workspace *Workspace) error {
 	`
 	_, err := db.conn.Exec(query, workspace.ID, workspace.DisplayName, workspace.Type, workspace.Description)
 	return err
+}
+
+// BatchSaveWorkspaces saves or updates multiple workspaces using DuckDB appender within a single transaction
+func (db *Database) BatchSaveWorkspaces(workspaces []Workspace) error {
+	if len(workspaces) == 0 {
+		return nil
+	}
+
+	// Execute DELETE + INSERT in a single transaction
+	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
+		// Extract IDs for deletion
+		ids := extractWorkspaceIDs(workspaces)
+
+		// Delete existing records in bulk (for upsert behavior)
+		if err := bulkDeleteByIDsWithConn(driverConn, "workspaces", ids); err != nil {
+			return err
+		}
+
+		// Use appender for bulk insert (within the same transaction)
+		if err := appendWorkspaces(driverConn, workspaces); err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 // GetWorkspaces retrieves all workspaces
@@ -63,6 +89,31 @@ func (db *Database) SaveItem(item *Item) error {
 	return err
 }
 
+// BatchSaveItems saves or updates multiple items using DuckDB appender within a single transaction
+func (db *Database) BatchSaveItems(items []Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Execute DELETE + INSERT in a single transaction
+	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
+		// Extract IDs for deletion
+		ids := extractItemIDs(items)
+
+		// Delete existing records in bulk (for upsert behavior)
+		if err := bulkDeleteByIDsWithConn(driverConn, "items", ids); err != nil {
+			return err
+		}
+
+		// Use appender for bulk insert (within the same transaction)
+		if err := appendItems(driverConn, items); err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
 // GetItemsByWorkspace retrieves items for a specific workspace
 func (db *Database) GetItemsByWorkspace(workspaceID string) ([]Item, error) {
 	query := `
@@ -89,49 +140,29 @@ func (db *Database) GetItemsByWorkspace(workspaceID string) ([]Item, error) {
 	return items, rows.Err()
 }
 
-// SaveJobInstances bulk inserts job instances
+// SaveJobInstances bulk inserts job instances using DuckDB appender within a single transaction
 func (db *Database) SaveJobInstances(jobs []JobInstance) error {
 	if len(jobs) == 0 {
 		return nil
 	}
 
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	// Execute DELETE + INSERT in a single transaction
+	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
+		// Extract IDs for deletion
+		ids := extractJobInstanceIDs(jobs)
 
-	query := `
-		INSERT INTO job_instances (
-			id, workspace_id, item_id, job_type, status, start_time,
-			end_time, duration_ms, failure_reason, invoker_type, root_activity_id, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, get_current_timestamp())
-		ON CONFLICT(id) DO UPDATE SET
-			status = EXCLUDED.status,
-			end_time = EXCLUDED.end_time,
-			duration_ms = EXCLUDED.duration_ms,
-			failure_reason = EXCLUDED.failure_reason,
-			root_activity_id = EXCLUDED.root_activity_id,
-			updated_at = get_current_timestamp()
-	`
-
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, job := range jobs {
-		_, err = stmt.Exec(
-			job.ID, job.WorkspaceID, job.ItemID, job.JobType, job.Status, job.StartTime,
-			job.EndTime, job.DurationMs, job.FailureReason, job.InvokerType, job.RootActivityID,
-		)
-		if err != nil {
+		// Delete existing records in bulk (for upsert behavior)
+		if err := bulkDeleteByIDsWithConn(driverConn, "job_instances", ids); err != nil {
 			return err
 		}
-	}
 
-	return tx.Commit()
+		// Use appender for bulk insert (within the same transaction)
+		if err := appendJobInstances(driverConn, jobs); err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 // GetJobInstances retrieves job instances with filtering
@@ -1563,78 +1594,29 @@ func convertToMilliseconds(value int, timeUnit string) int {
 	}
 }
 
-// SaveLivySessions saves Livy sessions using bulk DELETE+INSERT pattern for DuckDB performance
+// SaveLivySessions saves Livy sessions using DuckDB appender within a single transaction
 func (db *Database) SaveLivySessions(sessions []NotebookSession) error {
 	if len(sessions) == 0 {
 		return nil
 	}
 
-	tx, err := db.conn.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
+	// Execute DELETE + INSERT in a single transaction
+	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
+		// Extract IDs for deletion
+		ids := extractNotebookSessionIDs(sessions)
 
-	// Bulk DELETE existing sessions
-	livyIDs := make([]string, len(sessions))
-	for i, s := range sessions {
-		livyIDs[i] = s.LivyID
-	}
-
-	placeholders := make([]string, len(livyIDs))
-	args := make([]interface{}, len(livyIDs))
-	for i, id := range livyIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	deleteQuery := fmt.Sprintf("DELETE FROM notebook_sessions WHERE livy_id IN (%s)", strings.Join(placeholders, ","))
-	_, err = tx.Exec(deleteQuery, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete existing sessions: %w", err)
-	}
-
-	// Bulk INSERT new sessions
-	insertQuery := `
-		INSERT INTO notebook_sessions (
-			livy_id, job_instance_id, workspace_id, notebook_id,
-			spark_application_id, state, origin, attempt_number,
-			livy_name, submitter_id, submitter_type, item_name,
-			item_type, job_type, submitted_datetime, start_datetime,
-			end_datetime, queued_duration_ms, running_duration_ms,
-			total_duration_ms, cancellation_reason, capacity_id,
-			operation_name, consumer_identity_id, runtime_version,
-			is_high_concurrency, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, get_current_timestamp())
-	`
-
-	stmt, err := tx.Prepare(insertQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, s := range sessions {
-		_, err = stmt.Exec(
-			s.LivyID, s.JobInstanceID, s.WorkspaceID, s.NotebookID,
-			s.SparkApplicationID, s.State, s.Origin, s.AttemptNumber,
-			s.LivyName, s.SubmitterID, s.SubmitterType, s.ItemName,
-			s.ItemType, s.JobType, s.SubmittedDateTime, s.StartDateTime,
-			s.EndDateTime, s.QueuedDurationMs, s.RunningDurationMs,
-			s.TotalDurationMs, s.CancellationReason, s.CapacityID,
-			s.OperationName, s.ConsumerIdentityID, s.RuntimeVersion,
-			s.IsHighConcurrency,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert session %s: %w", s.LivyID, err)
+		// Bulk DELETE existing sessions by livy_id (for upsert behavior)
+		if err := bulkDeleteByColumnWithConn(driverConn, "notebook_sessions", "livy_id", ids); err != nil {
+			return err
 		}
-	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
+		// Use appender for bulk insert (within the same transaction)
+		if err := appendNotebookSessions(driverConn, sessions); err != nil {
+			return err
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // GetLivyIDsByJobInstanceIDs returns a map of job instance ID -> livy ID for the given job IDs
