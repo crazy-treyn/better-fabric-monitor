@@ -18,7 +18,7 @@ func GenerateFabricURL(workspaceID, itemID, itemType, jobRunID string, livyID *s
 			return ""
 		}
 		return fmt.Sprintf(
-			"https://app.powerbi.com/workloads/data-pipeline/monitoring/workspaces/%s/pipelines/%s/%s?experience=power-bi",
+			"https://app.powerbi.com/workloads/data-pipeline/monitoring/workspaces/%s/pipelines/%s/%s?experience=fabric-developer",
 			workspaceID, itemID, jobRunID,
 		)
 	case "Notebook":
@@ -29,14 +29,14 @@ func GenerateFabricURL(workspaceID, itemID, itemType, jobRunID string, livyID *s
 		// Use livyID if available for correct URL
 		if livyID != nil && *livyID != "" {
 			return fmt.Sprintf(
-				"https://app.powerbi.com/workloads/de-ds/sparkmonitor/%s/%s?experience=power-bi",
+				"https://app.powerbi.com/workloads/de-ds/sparkmonitor/%s/%s?experience=fabric-developer",
 				itemID, *livyID,
 			)
 		}
 		// Fall back to jobRunID (may not work, but better than no link)
 		// To get correct links, run SyncNotebookSessions() to populate livyID
 		return fmt.Sprintf(
-			"https://app.powerbi.com/workloads/de-ds/sparkmonitor/%s/%s?experience=power-bi",
+			"https://app.powerbi.com/workloads/de-ds/sparkmonitor/%s/%s?experience=fabric-developer",
 			itemID, jobRunID,
 		)
 	default:
