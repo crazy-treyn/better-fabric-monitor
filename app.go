@@ -1556,137 +1556,183 @@ func (a *App) SyncNotebookSessions() error {
 
 	Log("Found %d unique notebooks to sync\n", len(notebooks))
 
-	totalSessions := 0
+	// Use worker pool to parallelize notebook session fetching
+	numWorkers := 4 // Process 4 notebooks concurrently
+	notebookChan := make(chan struct {
+		WorkspaceID string
+		NotebookID  string
+	}, len(notebooks))
+	resultsChan := make(chan int, len(notebooks))
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for notebook := range notebookChan {
+				sessionsCount := a.syncNotebookSessions(notebook.WorkspaceID, notebook.NotebookID)
+				resultsChan <- sessionsCount
+			}
+		}()
+	}
+
+	// Send notebooks to workers
 	for _, notebook := range notebooks {
-		continuationToken := ""
-		notebookSessions := 0
-
-		// Paginate through all Livy sessions for this notebook
-		for {
-			response, err := a.fabricClient.GetLivySessions(a.ctx, notebook.WorkspaceID, notebook.NotebookID, continuationToken)
-			if err != nil {
-				Log("Warning: failed to get Livy sessions for notebook %s: %v\n", notebook.NotebookID, err)
-				break // Skip this notebook and continue with others
-			}
-
-			if response == nil || len(response.Value) == 0 {
-				break
-			}
-
-			// Convert fabric.LivySession to db.NotebookSession
-			dbSessions := make([]db.NotebookSession, 0, len(response.Value))
-			for _, livySession := range response.Value {
-				dbSession := db.NotebookSession{
-					LivyID:        livySession.LivyID,
-					JobInstanceID: livySession.JobInstanceID,
-					WorkspaceID:   notebook.WorkspaceID,
-					NotebookID:    notebook.NotebookID,
-					State:         livySession.State, // Required non-pointer field
-				}
-
-				// Handle optional string fields
-				if livySession.SparkApplicationID != "" {
-					dbSession.SparkApplicationID = &livySession.SparkApplicationID
-				}
-				if livySession.Origin != "" {
-					dbSession.Origin = &livySession.Origin
-				}
-				if livySession.AttemptNumber != 0 {
-					dbSession.AttemptNumber = &livySession.AttemptNumber
-				}
-				if livySession.LivyName != "" {
-					dbSession.LivyName = &livySession.LivyName
-				}
-				if livySession.CancellationReason != "" {
-					dbSession.CancellationReason = &livySession.CancellationReason
-				}
-				if livySession.CapacityID != "" {
-					dbSession.CapacityID = &livySession.CapacityID
-				}
-				if livySession.OperationName != "" {
-					dbSession.OperationName = &livySession.OperationName
-				}
-				if livySession.RuntimeVersion != "" {
-					dbSession.RuntimeVersion = &livySession.RuntimeVersion
-				}
-				dbSession.IsHighConcurrency = &livySession.IsHighConcurrency
-
-				// Handle FabricTime fields
-				if !livySession.SubmittedDateTime.Time.IsZero() {
-					dbSession.SubmittedDateTime = &livySession.SubmittedDateTime.Time
-				}
-				if !livySession.StartDateTime.Time.IsZero() {
-					dbSession.StartDateTime = &livySession.StartDateTime.Time
-				}
-				if !livySession.EndDateTime.Time.IsZero() {
-					dbSession.EndDateTime = &livySession.EndDateTime.Time
-				}
-
-				// Extract submitter info
-				if livySession.Submitter.ID != "" {
-					dbSession.SubmitterID = &livySession.Submitter.ID
-				}
-				if livySession.Submitter.Type != "" {
-					dbSession.SubmitterType = &livySession.Submitter.Type
-				}
-
-				// Extract item info from top-level fields (not nested Item struct)
-				if livySession.ItemName != "" {
-					dbSession.ItemName = &livySession.ItemName
-				}
-				if livySession.ItemType != "" {
-					dbSession.ItemType = &livySession.ItemType
-				}
-				if livySession.JobType != "" {
-					dbSession.JobType = &livySession.JobType
-				}
-
-				// Convert durations to milliseconds
-				if livySession.QueuedDuration.Value > 0 {
-					ms := convertToMs(livySession.QueuedDuration.Value, livySession.QueuedDuration.TimeUnit)
-					dbSession.QueuedDurationMs = &ms
-				}
-				if livySession.RunningDuration.Value > 0 {
-					ms := convertToMs(livySession.RunningDuration.Value, livySession.RunningDuration.TimeUnit)
-					dbSession.RunningDurationMs = &ms
-				}
-				if livySession.TotalDuration.Value > 0 {
-					ms := convertToMs(livySession.TotalDuration.Value, livySession.TotalDuration.TimeUnit)
-					dbSession.TotalDurationMs = &ms
-				}
-
-				// Extract consumer identity ID
-				if livySession.ConsumerIdentity.ID != "" {
-					dbSession.ConsumerIdentityID = &livySession.ConsumerIdentity.ID
-				}
-
-				dbSessions = append(dbSessions, dbSession)
-			}
-
-			// Save sessions to database
-			if len(dbSessions) > 0 {
-				if err := a.db.SaveLivySessions(dbSessions); err != nil {
-					Log("Warning: failed to save Livy sessions for notebook %s: %v\n", notebook.NotebookID, err)
-					break
-				}
-				notebookSessions += len(dbSessions)
-				totalSessions += len(dbSessions)
-			}
-
-			// Check if there are more pages
-			if response.ContinuationToken == "" {
-				break
-			}
-			continuationToken = response.ContinuationToken
+		notebookChan <- struct {
+			WorkspaceID string
+			NotebookID  string
+		}{
+			WorkspaceID: notebook.WorkspaceID,
+			NotebookID:  notebook.NotebookID,
 		}
+	}
+	close(notebookChan)
 
-		if notebookSessions > 0 {
-			Log("Synced %d sessions for notebook %s\n", notebookSessions, notebook.NotebookID)
-		}
+	// Wait for all workers to complete
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results
+	totalSessions := 0
+	for count := range resultsChan {
+		totalSessions += count
 	}
 
 	Log("Notebook sessions sync complete: %d total sessions synced\n", totalSessions)
 	return nil
+}
+
+// syncNotebookSessions fetches and saves Livy sessions for a single notebook
+func (a *App) syncNotebookSessions(workspaceID, notebookID string) int {
+	continuationToken := ""
+	totalSessions := 0
+
+	// Paginate through all Livy sessions for this notebook
+	for {
+		response, err := a.fabricClient.GetLivySessions(a.ctx, workspaceID, notebookID, continuationToken)
+		if err != nil {
+			Log("Warning: failed to get Livy sessions for notebook %s: %v\n", notebookID, err)
+			break // Skip this notebook
+		}
+
+		if response == nil || len(response.Value) == 0 {
+			break
+		}
+
+		// Convert fabric.LivySession to db.NotebookSession
+		dbSessions := make([]db.NotebookSession, 0, len(response.Value))
+		for _, livySession := range response.Value {
+			dbSession := db.NotebookSession{
+				LivyID:        livySession.LivyID,
+				JobInstanceID: livySession.JobInstanceID,
+				WorkspaceID:   workspaceID,
+				NotebookID:    notebookID,
+				State:         livySession.State, // Required non-pointer field
+			}
+
+			// Handle optional string fields
+			if livySession.SparkApplicationID != "" {
+				dbSession.SparkApplicationID = &livySession.SparkApplicationID
+			}
+			if livySession.Origin != "" {
+				dbSession.Origin = &livySession.Origin
+			}
+			if livySession.AttemptNumber != 0 {
+				dbSession.AttemptNumber = &livySession.AttemptNumber
+			}
+			if livySession.LivyName != "" {
+				dbSession.LivyName = &livySession.LivyName
+			}
+			if livySession.CancellationReason != "" {
+				dbSession.CancellationReason = &livySession.CancellationReason
+			}
+			if livySession.CapacityID != "" {
+				dbSession.CapacityID = &livySession.CapacityID
+			}
+			if livySession.OperationName != "" {
+				dbSession.OperationName = &livySession.OperationName
+			}
+			if livySession.RuntimeVersion != "" {
+				dbSession.RuntimeVersion = &livySession.RuntimeVersion
+			}
+			dbSession.IsHighConcurrency = &livySession.IsHighConcurrency
+
+			// Handle FabricTime fields
+			if !livySession.SubmittedDateTime.Time.IsZero() {
+				dbSession.SubmittedDateTime = &livySession.SubmittedDateTime.Time
+			}
+			if !livySession.StartDateTime.Time.IsZero() {
+				dbSession.StartDateTime = &livySession.StartDateTime.Time
+			}
+			if !livySession.EndDateTime.Time.IsZero() {
+				dbSession.EndDateTime = &livySession.EndDateTime.Time
+			}
+
+			// Extract submitter info
+			if livySession.Submitter.ID != "" {
+				dbSession.SubmitterID = &livySession.Submitter.ID
+			}
+			if livySession.Submitter.Type != "" {
+				dbSession.SubmitterType = &livySession.Submitter.Type
+			}
+
+			// Extract item info from top-level fields (not nested Item struct)
+			if livySession.ItemName != "" {
+				dbSession.ItemName = &livySession.ItemName
+			}
+			if livySession.ItemType != "" {
+				dbSession.ItemType = &livySession.ItemType
+			}
+			if livySession.JobType != "" {
+				dbSession.JobType = &livySession.JobType
+			}
+
+			// Convert durations to milliseconds
+			if livySession.QueuedDuration.Value > 0 {
+				ms := convertToMs(livySession.QueuedDuration.Value, livySession.QueuedDuration.TimeUnit)
+				dbSession.QueuedDurationMs = &ms
+			}
+			if livySession.RunningDuration.Value > 0 {
+				ms := convertToMs(livySession.RunningDuration.Value, livySession.RunningDuration.TimeUnit)
+				dbSession.RunningDurationMs = &ms
+			}
+			if livySession.TotalDuration.Value > 0 {
+				ms := convertToMs(livySession.TotalDuration.Value, livySession.TotalDuration.TimeUnit)
+				dbSession.TotalDurationMs = &ms
+			}
+
+			// Extract consumer identity ID
+			if livySession.ConsumerIdentity.ID != "" {
+				dbSession.ConsumerIdentityID = &livySession.ConsumerIdentity.ID
+			}
+
+			dbSessions = append(dbSessions, dbSession)
+		}
+
+		// Save sessions to database
+		if len(dbSessions) > 0 {
+			if err := a.db.SaveLivySessions(dbSessions); err != nil {
+				Log("Warning: failed to save Livy sessions for notebook %s: %v\n", notebookID, err)
+				break
+			}
+			totalSessions += len(dbSessions)
+		}
+
+		// Check if there are more pages
+		if response.ContinuationToken == "" {
+			break
+		}
+		continuationToken = response.ContinuationToken
+	}
+
+	if totalSessions > 0 {
+		Log("Synced %d sessions for notebook %s\n", totalSessions, notebookID)
+	}
+
+	return totalSessions
 }
 
 // convertToMs converts duration from Fabric API to milliseconds
