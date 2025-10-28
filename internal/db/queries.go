@@ -319,27 +319,58 @@ func (db *Database) GetJobInstanceWithActivities(jobID string) (*JobInstance, er
 // GetChildExecutions extracts child pipeline and notebook executions from activity runs
 func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 	query := `
+		WITH child_activities AS (
+			SELECT 
+				json_extract_string(activity, '$.activityRunId') as activity_run_id,
+				json_extract_string(activity, '$.activityName') as activity_name,
+				json_extract_string(activity, '$.activityType') as activity_type,
+				json_extract_string(activity, '$.status') as status,
+				json_extract_string(activity, '$.activityRunStart') as start_time,
+				json_extract_string(activity, '$.activityRunEnd') as end_time,
+				CAST(json_extract(activity, '$.durationInMs') AS BIGINT) as duration_ms,
+				json_extract_string(activity, '$.error.message') as error_message,
+				json_extract_string(activity, '$.pipelineId') as pipeline_id,
+				-- Extract child job instance ID from output
+				COALESCE(
+					json_extract_string(activity, '$.output.pipelineRunId'),
+					json_extract_string(activity, '$.output.runId')
+				) as child_job_instance_id,
+				-- Extract child pipeline name from output
+				json_extract_string(activity, '$.output.properties.pipelineName') as child_pipeline_name,
+				-- Parent job's workspace
+				j.workspace_id as parent_workspace_id
+			FROM job_instances j
+			CROSS JOIN unnest(
+				CASE 
+					WHEN j.activity_runs IS NOT NULL 
+					THEN CAST(j.activity_runs AS JSON[])
+					ELSE []::JSON[]
+				END
+			) as t(activity)
+			WHERE j.id = ?
+				AND json_extract_string(activity, '$.activityType') IN ('ExecutePipeline', 'TridentNotebook')
+		)
 		SELECT 
-			json_extract_string(activity, '$.activityRunId') as activity_run_id,
-			json_extract_string(activity, '$.activityName') as activity_name,
-			json_extract_string(activity, '$.activityType') as activity_type,
-			json_extract_string(activity, '$.status') as status,
-			json_extract_string(activity, '$.activityRunStart') as start_time,
-			json_extract_string(activity, '$.activityRunEnd') as end_time,
-			CAST(json_extract(activity, '$.durationInMs') AS BIGINT) as duration_ms,
-			json_extract_string(activity, '$.error.message') as error_message,
-			json_extract_string(activity, '$.pipelineId') as pipeline_id
-		FROM job_instances j
-		CROSS JOIN unnest(
-			CASE 
-				WHEN j.activity_runs IS NOT NULL 
-				THEN CAST(j.activity_runs AS JSON[])
-				ELSE []::JSON[]
-			END
-		) as t(activity)
-		WHERE j.id = ?
-			AND json_extract_string(activity, '$.activityType') IN ('ExecutePipeline', 'TridentNotebook')
-		ORDER BY json_extract_string(activity, '$.activityRunStart') ASC
+			ca.activity_run_id,
+			ca.activity_name,
+			ca.activity_type,
+			ca.status,
+			ca.start_time,
+			ca.end_time,
+			ca.duration_ms,
+			ca.error_message,
+			ca.pipeline_id,
+			ca.child_job_instance_id,
+			ca.child_pipeline_name,
+			ca.parent_workspace_id,
+			-- Join with job_instances to get child job details if exists
+			child_job.item_id as child_item_id,
+			child_item.type as child_item_type,
+			child_item.display_name as child_item_display_name
+		FROM child_activities ca
+		LEFT JOIN job_instances child_job ON child_job.id = ca.child_job_instance_id
+		LEFT JOIN items child_item ON child_job.item_id = child_item.id
+		ORDER BY ca.start_time ASC
 	`
 
 	rows, err := db.conn.Query(query, jobID)
@@ -355,6 +386,12 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 		var endTimeStr sql.NullString
 		var durationMs sql.NullInt64
 		var errorMsg sql.NullString
+		var childJobInstanceID sql.NullString
+		var childPipelineName sql.NullString
+		var parentWorkspaceID sql.NullString
+		var childItemID sql.NullString
+		var childItemType sql.NullString
+		var childItemDisplayName sql.NullString
 
 		err := rows.Scan(
 			&child.ActivityRunID,
@@ -366,6 +403,12 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 			&durationMs,
 			&errorMsg,
 			&child.PipelineID,
+			&childJobInstanceID,
+			&childPipelineName,
+			&parentWorkspaceID,
+			&childItemID,
+			&childItemType,
+			&childItemDisplayName,
 		)
 		if err != nil {
 			return nil, err
@@ -395,6 +438,26 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 		// Set error message if present
 		if errorMsg.Valid && errorMsg.String != "" {
 			child.ErrorMessage = &errorMsg.String
+		}
+
+		// Set child execution details for deep linking
+		if childJobInstanceID.Valid && childJobInstanceID.String != "" {
+			child.ChildJobInstanceID = &childJobInstanceID.String
+		}
+		if childPipelineName.Valid && childPipelineName.String != "" {
+			child.ChildPipelineName = &childPipelineName.String
+		}
+		if parentWorkspaceID.Valid && parentWorkspaceID.String != "" {
+			child.ChildWorkspaceID = &parentWorkspaceID.String
+		}
+		if childItemID.Valid && childItemID.String != "" {
+			child.ChildItemID = &childItemID.String
+		}
+		if childItemType.Valid && childItemType.String != "" {
+			child.ChildItemType = &childItemType.String
+		}
+		if childItemDisplayName.Valid && childItemDisplayName.String != "" {
+			child.ChildItemDisplayName = &childItemDisplayName.String
 		}
 
 		// For future recursive expansion - check if this is an ExecutePipeline

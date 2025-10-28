@@ -4,6 +4,7 @@
     import { filterStore } from "../stores/filters.js";
     import Analytics from "./Analytics.svelte";
     import Logs from "./Logs.svelte";
+    import FabricLink from "./FabricLink.svelte";
 
     let workspaces = [];
     let jobs = [];
@@ -824,6 +825,9 @@
                                                             {job.itemDisplayName ||
                                                                 job.itemId}
                                                         </span>
+                                                        <FabricLink
+                                                            url={job.fabricUrl}
+                                                        />
                                                         {#if job.itemType === "DataPipeline" && jobChildrenCache.has(job.id)}
                                                             {@const childCount =
                                                                 jobChildrenCache.get(
@@ -960,6 +964,9 @@
                                                                 <span>
                                                                     {child.activityName}
                                                                 </span>
+                                                                <FabricLink
+                                                                    url={child.fabricUrl}
+                                                                />
                                                             </div>
                                                             {#if child.childPipelineName || child.childNotebookName}
                                                                 <div
@@ -1040,6 +1047,9 @@
                                                                         <span>
                                                                             {grandchild.activityName}
                                                                         </span>
+                                                                        <FabricLink
+                                                                            url={grandchild.fabricUrl}
+                                                                        />
                                                                     </div>
                                                                     {#if grandchild.childPipelineName || grandchild.childNotebookName}
                                                                         <div

@@ -81,16 +81,23 @@ type JobInstance struct {
 
 // ChildExecution represents a child pipeline or notebook execution
 type ChildExecution struct {
-	ActivityRunID string     `json:"activityRunId"`
-	ActivityName  string     `json:"activityName"`
-	ActivityType  string     `json:"activityType"`
-	Status        string     `json:"status"`
-	StartTime     *time.Time `json:"activityRunStart"` // Match API field name
-	EndTime       *time.Time `json:"activityRunEnd"`   // Match API field name
-	DurationMs    *int64     `json:"durationMs"`
-	ErrorMessage  *string    `json:"errorMessage"`
-	PipelineID    string     `json:"pipelineId"`
-	HasChildren   bool       `json:"hasChildren"` // For future recursive expansion
+	ActivityRunID        string     `json:"activityRunId"`
+	ActivityName         string     `json:"activityName"`
+	ActivityType         string     `json:"activityType"`
+	Status               string     `json:"status"`
+	StartTime            *time.Time `json:"activityRunStart"` // Match API field name
+	EndTime              *time.Time `json:"activityRunEnd"`   // Match API field name
+	DurationMs           *int64     `json:"durationMs"`
+	ErrorMessage         *string    `json:"errorMessage"`
+	PipelineID           string     `json:"pipelineId"`
+	HasChildren          bool       `json:"hasChildren"` // For future recursive expansion
+	ChildJobInstanceID   *string    `json:"childJobInstanceId,omitempty"`
+	ChildPipelineName    *string    `json:"childPipelineName,omitempty"`
+	ChildNotebookName    *string    `json:"childNotebookName,omitempty"` // Alias for display name
+	ChildWorkspaceID     *string    `json:"childWorkspaceId,omitempty"`
+	ChildItemID          *string    `json:"childItemId,omitempty"`
+	ChildItemType        *string    `json:"childItemType,omitempty"`
+	ChildItemDisplayName *string    `json:"childItemDisplayName,omitempty"`
 }
 
 // PipelineRun represents a pipeline run

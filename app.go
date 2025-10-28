@@ -11,6 +11,7 @@ import (
 	"better-fabric-monitor/internal/config"
 	"better-fabric-monitor/internal/db"
 	"better-fabric-monitor/internal/fabric"
+	"better-fabric-monitor/internal/utils"
 )
 
 // LogEntry represents a single log entry
@@ -576,6 +577,20 @@ func (a *App) GetJobs() []map[string]interface{} {
 		}
 	}
 
+	// Add Fabric deep link URLs to jobs
+	for i := range jobs {
+		job := jobs[i]
+		workspaceID, _ := job["workspaceId"].(string)
+		itemID, _ := job["itemId"].(string)
+		itemType, _ := job["itemType"].(string)
+		jobID, _ := job["id"].(string)
+
+		fabricURL := utils.GenerateFabricURL(workspaceID, itemID, itemType, jobID)
+		if fabricURL != "" {
+			jobs[i]["fabricUrl"] = fabricURL
+		}
+	}
+
 	// If doing incremental sync, get cached jobs BEFORE persisting to database
 	var cachedJobs []map[string]interface{}
 	if startTimeFrom != nil && a.db != nil {
@@ -761,10 +776,13 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
 		}
 
+		var itemType string
 		if job.ItemType != nil {
 			jobMap["itemType"] = *job.ItemType
+			itemType = *job.ItemType
 		} else {
 			jobMap["itemType"] = job.JobType // Fallback to job type
+			itemType = job.JobType
 		}
 
 		// Add workspace name from the joined data
@@ -783,6 +801,12 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		}
 		if job.RootActivityID != nil {
 			jobMap["rootActivityId"] = *job.RootActivityID
+		}
+
+		// Generate Fabric deep link URL
+		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID)
+		if fabricURL != "" {
+			jobMap["fabricUrl"] = fabricURL
 		}
 
 		result = append(result, jobMap)
@@ -886,7 +910,31 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
-		result["recentFailures"] = recentFailures
+		// Add Fabric URLs to failures
+		failuresWithURLs := make([]map[string]interface{}, 0, len(recentFailures))
+		for _, failure := range recentFailures {
+			failureMap := map[string]interface{}{
+				"id":              failure.ID,
+				"workspaceId":     failure.WorkspaceID,
+				"workspaceName":   failure.WorkspaceName,
+				"itemId":          failure.ItemID,
+				"itemDisplayName": failure.ItemDisplayName,
+				"itemType":        failure.ItemType,
+				"jobType":         failure.JobType,
+				"startTime":       failure.StartTime.Format(time.RFC3339),
+				"endTime":         failure.EndTime.Format(time.RFC3339),
+				"durationMs":      failure.DurationMs,
+				"failureReason":   failure.FailureReason,
+			}
+
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID)
+			if fabricURL != "" {
+				failureMap["fabricUrl"] = fabricURL
+			}
+
+			failuresWithURLs = append(failuresWithURLs, failureMap)
+		}
+		result["recentFailures"] = failuresWithURLs
 	}
 
 	// Get long-running jobs (50% or more above average, last 10)
@@ -895,7 +943,31 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
-		result["longRunningJobs"] = longRunningJobs
+		// Add Fabric URLs to long-running jobs
+		jobsWithURLs := make([]map[string]interface{}, 0, len(longRunningJobs))
+		for _, job := range longRunningJobs {
+			jobMap := map[string]interface{}{
+				"id":              job.ID,
+				"workspaceId":     job.WorkspaceID,
+				"workspaceName":   job.WorkspaceName,
+				"itemId":          job.ItemID,
+				"itemDisplayName": job.ItemDisplayName,
+				"itemType":        job.ItemType,
+				"jobType":         job.JobType,
+				"startTime":       job.StartTime.Format(time.RFC3339),
+				"durationMs":      job.DurationMs,
+				"avgDurationMs":   job.AvgDurationMs,
+				"deviationPct":    job.DeviationPct,
+			}
+
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID)
+			if fabricURL != "" {
+				jobMap["fabricUrl"] = fabricURL
+			}
+
+			jobsWithURLs = append(jobsWithURLs, jobMap)
+		}
+		result["longRunningJobs"] = jobsWithURLs
 	}
 
 	// Get overall stats - calculated entirely in DuckDB for consistency
@@ -966,7 +1038,31 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
-		result["recentFailures"] = recentFailures
+		// Add Fabric URLs to failures
+		failuresWithURLs := make([]map[string]interface{}, 0, len(recentFailures))
+		for _, failure := range recentFailures {
+			failureMap := map[string]interface{}{
+				"id":              failure.ID,
+				"workspaceId":     failure.WorkspaceID,
+				"workspaceName":   failure.WorkspaceName,
+				"itemId":          failure.ItemID,
+				"itemDisplayName": failure.ItemDisplayName,
+				"itemType":        failure.ItemType,
+				"jobType":         failure.JobType,
+				"startTime":       failure.StartTime.Format(time.RFC3339),
+				"endTime":         failure.EndTime.Format(time.RFC3339),
+				"durationMs":      failure.DurationMs,
+				"failureReason":   failure.FailureReason,
+			}
+
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID)
+			if fabricURL != "" {
+				failureMap["fabricUrl"] = fabricURL
+			}
+
+			failuresWithURLs = append(failuresWithURLs, failureMap)
+		}
+		result["recentFailures"] = failuresWithURLs
 	}
 
 	// Get long-running jobs (50% or more above average, last 10)
@@ -975,7 +1071,31 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
-		result["longRunningJobs"] = longRunningJobs
+		// Add Fabric URLs to long-running jobs
+		jobsWithURLs := make([]map[string]interface{}, 0, len(longRunningJobs))
+		for _, job := range longRunningJobs {
+			jobMap := map[string]interface{}{
+				"id":              job.ID,
+				"workspaceId":     job.WorkspaceID,
+				"workspaceName":   job.WorkspaceName,
+				"itemId":          job.ItemID,
+				"itemDisplayName": job.ItemDisplayName,
+				"itemType":        job.ItemType,
+				"jobType":         job.JobType,
+				"startTime":       job.StartTime.Format(time.RFC3339),
+				"durationMs":      job.DurationMs,
+				"avgDurationMs":   job.AvgDurationMs,
+				"deviationPct":    job.DeviationPct,
+			}
+
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID)
+			if fabricURL != "" {
+				jobMap["fabricUrl"] = fabricURL
+			}
+
+			jobsWithURLs = append(jobsWithURLs, jobMap)
+		}
+		result["longRunningJobs"] = jobsWithURLs
 	}
 
 	// Get overall stats - calculated entirely in DuckDB for consistency
@@ -1278,9 +1398,76 @@ func (a *App) GetChildExecutions(jobID string) map[string]interface{} {
 		}
 	}
 
+	// Convert to map format and add Fabric URLs
+	childrenMaps := make([]map[string]interface{}, 0, len(children))
+	for _, child := range children {
+		childMap := map[string]interface{}{
+			"activityRunId": child.ActivityRunID,
+			"activityName":  child.ActivityName,
+			"activityType":  child.ActivityType,
+			"status":        child.Status,
+			"pipelineId":    child.PipelineID,
+			"hasChildren":   child.HasChildren,
+		}
+
+		// Add optional time fields
+		if child.StartTime != nil {
+			childMap["activityRunStart"] = child.StartTime.Format(time.RFC3339)
+		}
+		if child.EndTime != nil {
+			childMap["activityRunEnd"] = child.EndTime.Format(time.RFC3339)
+		}
+		if child.DurationMs != nil {
+			childMap["durationMs"] = *child.DurationMs
+		}
+		if child.ErrorMessage != nil {
+			childMap["error"] = *child.ErrorMessage
+		}
+
+		// Add child execution details
+		if child.ChildJobInstanceID != nil {
+			childMap["childJobInstanceId"] = *child.ChildJobInstanceID
+		}
+		if child.ChildPipelineName != nil {
+			childMap["childPipelineName"] = *child.ChildPipelineName
+		}
+		if child.ChildItemDisplayName != nil {
+			childMap["childNotebookName"] = *child.ChildItemDisplayName // For notebooks
+		}
+		if child.ChildWorkspaceID != nil {
+			childMap["childWorkspaceId"] = *child.ChildWorkspaceID
+		}
+		if child.ChildItemID != nil {
+			childMap["childItemId"] = *child.ChildItemID
+		}
+		if child.ChildItemType != nil {
+			childMap["childItemType"] = *child.ChildItemType
+		}
+
+		// Generate Fabric deep link URL for child execution if we have the required info
+		if child.ChildJobInstanceID != nil && child.ChildWorkspaceID != nil {
+			var itemID string
+			var itemType string
+
+			if child.ChildItemID != nil {
+				itemID = *child.ChildItemID
+			}
+			if child.ChildItemType != nil {
+				itemType = *child.ChildItemType
+			}
+
+			fabricURL := utils.GenerateFabricURL(*child.ChildWorkspaceID, itemID, itemType, *child.ChildJobInstanceID)
+			if fabricURL != "" {
+				childMap["fabricUrl"] = fabricURL
+			}
+		}
+
+		childrenMaps = append(childrenMaps, childMap)
+	}
+
 	return map[string]interface{}{
-		"children": children,
-		"count":    len(children),
+		"children": childrenMaps,
+		"count":    len(childrenMaps),
 	}
 }
 
