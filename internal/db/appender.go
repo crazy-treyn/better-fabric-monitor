@@ -204,6 +204,12 @@ func appendJobInstances(driverConn driver.Conn, jobs []JobInstance) error {
 			rootActivityID = *job.RootActivityID
 		}
 
+		// Handle ActivityRuns - convert empty slice to NULL for proper enrichment later
+		var activityRuns interface{} = nil
+		if len(job.ActivityRuns) > 0 {
+			activityRuns = job.ActivityRuns
+		}
+
 		err = appender.AppendRow(
 			job.ID,
 			job.WorkspaceID,
@@ -216,7 +222,7 @@ func appendJobInstances(driverConn driver.Conn, jobs []JobInstance) error {
 			failureReason,
 			invokerType,
 			rootActivityID,
-			job.ActivityRuns,
+			activityRuns,
 			job.CreatedAt,
 			job.UpdatedAt,
 		)
