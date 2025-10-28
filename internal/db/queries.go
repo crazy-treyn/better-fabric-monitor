@@ -186,10 +186,12 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		SELECT j.id, j.workspace_id, j.item_id, j.job_type, j.status, j.start_time,
 			   j.end_time, j.duration_ms, j.failure_reason, j.invoker_type, j.root_activity_id, j.created_at, j.updated_at,
 			   i.display_name as item_display_name, i.type as item_type,
-			   w.display_name as workspace_display_name
+			   w.display_name as workspace_display_name,
+			   ns.livy_id
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN notebook_sessions ns ON j.id = ns.job_instance_id
 		%s
 		ORDER BY j.start_time DESC
 		%s
@@ -208,11 +210,12 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		var itemType sql.NullString
 		var workspaceDisplayName sql.NullString
 		var rootActivityID sql.NullString
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
 			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &rootActivityID, &job.CreatedAt, &job.UpdatedAt,
-			&itemDisplayName, &itemType, &workspaceDisplayName,
+			&itemDisplayName, &itemType, &workspaceDisplayName, &livyID,
 		)
 		if err != nil {
 			return nil, err
@@ -227,6 +230,9 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 		}
 		if workspaceDisplayName.Valid {
 			job.WorkspaceName = &workspaceDisplayName.String
+		}
+		if livyID.Valid {
+			job.LivyID = &livyID.String
 		}
 		if rootActivityID.Valid {
 			job.RootActivityID = &rootActivityID.String
@@ -366,10 +372,12 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 			-- Join with job_instances to get child job details if exists
 			child_job.item_id as child_item_id,
 			child_item.type as child_item_type,
-			child_item.display_name as child_item_display_name
+			child_item.display_name as child_item_display_name,
+			ns.livy_id
 		FROM child_activities ca
 		LEFT JOIN job_instances child_job ON child_job.id = ca.child_job_instance_id
 		LEFT JOIN items child_item ON child_job.item_id = child_item.id
+		LEFT JOIN notebook_sessions ns ON child_job.id = ns.job_instance_id
 		ORDER BY ca.start_time ASC
 	`
 
@@ -392,6 +400,7 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 		var childItemID sql.NullString
 		var childItemType sql.NullString
 		var childItemDisplayName sql.NullString
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&child.ActivityRunID,
@@ -409,6 +418,7 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 			&childItemID,
 			&childItemType,
 			&childItemDisplayName,
+			&livyID,
 		)
 		if err != nil {
 			return nil, err
@@ -458,6 +468,9 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 		}
 		if childItemDisplayName.Valid && childItemDisplayName.String != "" {
 			child.ChildItemDisplayName = &childItemDisplayName.String
+		}
+		if livyID.Valid && livyID.String != "" {
+			child.LivyID = &livyID.String
 		}
 
 		// For future recursive expansion - check if this is an ExecutePipeline
@@ -780,10 +793,12 @@ func (db *Database) GetRecentFailures(limit int, days int) ([]RecentFailure, err
 		SELECT
 			j.id, j.workspace_id, w.display_name as workspace_name,
 			j.item_id, i.display_name as item_display_name, i.type as item_type,
-			j.job_type, j.start_time, j.end_time, j.duration_ms, j.failure_reason
+			j.job_type, j.start_time, j.end_time, j.duration_ms, j.failure_reason,
+			ns.livy_id
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN notebook_sessions ns ON j.id = ns.job_instance_id
 		WHERE j.status = 'Failed' 
 			AND j.end_time IS NOT NULL
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -803,11 +818,13 @@ func (db *Database) GetRecentFailures(limit int, days int) ([]RecentFailure, err
 		var endTime sql.NullTime
 		var durationMs sql.NullInt64
 		var failureReason sql.NullString
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&f.ID, &f.WorkspaceID, &f.WorkspaceName,
 			&f.ItemID, &f.ItemDisplayName, &f.ItemType,
 			&f.JobType, &f.StartTime, &endTime, &durationMs, &failureReason,
+			&livyID,
 		)
 		if err != nil {
 			return nil, err
@@ -821,6 +838,9 @@ func (db *Database) GetRecentFailures(limit int, days int) ([]RecentFailure, err
 		}
 		if failureReason.Valid {
 			f.FailureReason = failureReason.String
+		}
+		if livyID.Valid {
+			f.LivyID = &livyID.String
 		}
 
 		failures = append(failures, f)
@@ -847,11 +867,13 @@ func (db *Database) GetLongRunningJobs(days int, minDeviationPct float64, limit 
 			j.item_id, i.display_name as item_display_name, i.type as item_type,
 			j.job_type, j.start_time, j.duration_ms,
 			a.avg_duration_ms,
-			((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) as deviation_pct
+			((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) as deviation_pct,
+			ns.livy_id
 		FROM job_instances j
 		INNER JOIN item_averages a ON j.item_id = a.item_id
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN notebook_sessions ns ON j.id = ns.job_instance_id
 		WHERE j.status = 'Completed'
 			AND j.duration_ms IS NOT NULL
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -869,15 +891,21 @@ func (db *Database) GetLongRunningJobs(days int, minDeviationPct float64, limit 
 	var jobs []LongRunningJob
 	for rows.Next() {
 		var j LongRunningJob
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&j.ID, &j.WorkspaceID, &j.WorkspaceName,
 			&j.ItemID, &j.ItemDisplayName, &j.ItemType,
 			&j.JobType, &j.StartTime, &j.DurationMs,
 			&j.AvgDurationMs, &j.DeviationPct,
+			&livyID,
 		)
 		if err != nil {
 			return nil, err
+		}
+
+		if livyID.Valid {
+			j.LivyID = &livyID.String
 		}
 
 		jobs = append(jobs, j)
@@ -1382,10 +1410,12 @@ func (db *Database) GetRecentFailuresFiltered(limit int, days int, workspaceIDs 
 		SELECT
 			j.id, j.workspace_id, w.display_name as workspace_name,
 			j.item_id, i.display_name as item_display_name, i.type as item_type,
-			j.job_type, j.start_time, j.end_time, j.duration_ms, j.failure_reason
+			j.job_type, j.start_time, j.end_time, j.duration_ms, j.failure_reason,
+			ns.livy_id
 		FROM job_instances j
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN notebook_sessions ns ON j.id = ns.job_instance_id
 		WHERE j.status = 'Failed' 
 			AND j.end_time IS NOT NULL
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -1410,11 +1440,13 @@ func (db *Database) GetRecentFailuresFiltered(limit int, days int, workspaceIDs 
 		var endTime sql.NullTime
 		var durationMs sql.NullInt64
 		var failureReason sql.NullString
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&f.ID, &f.WorkspaceID, &f.WorkspaceName,
 			&f.ItemID, &f.ItemDisplayName, &f.ItemType,
 			&f.JobType, &f.StartTime, &endTime, &durationMs, &failureReason,
+			&livyID,
 		)
 		if err != nil {
 			return nil, err
@@ -1428,6 +1460,9 @@ func (db *Database) GetRecentFailuresFiltered(limit int, days int, workspaceIDs 
 		}
 		if failureReason.Valid {
 			f.FailureReason = failureReason.String
+		}
+		if livyID.Valid {
+			f.LivyID = &livyID.String
 		}
 
 		failures = append(failures, f)
@@ -1458,11 +1493,13 @@ func (db *Database) GetLongRunningJobsFiltered(days int, minDeviationPct float64
 			j.item_id, i.display_name as item_display_name, i.type as item_type,
 			j.job_type, j.start_time, j.duration_ms,
 			a.avg_duration_ms,
-			((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) as deviation_pct
+			((j.duration_ms - a.avg_duration_ms) / a.avg_duration_ms * 100) as deviation_pct,
+			ns.livy_id
 		FROM job_instances j
 		INNER JOIN item_averages a ON j.item_id = a.item_id
 		LEFT JOIN items i ON j.item_id = i.id
 		LEFT JOIN workspaces w ON j.workspace_id = w.id
+		LEFT JOIN notebook_sessions ns ON j.id = ns.job_instance_id
 		WHERE j.status = 'Completed'
 			AND j.duration_ms IS NOT NULL
 			AND j.start_time >= CURRENT_TIMESTAMP - INTERVAL (? || ' days')
@@ -1488,18 +1525,171 @@ func (db *Database) GetLongRunningJobsFiltered(days int, minDeviationPct float64
 	var jobs []LongRunningJob
 	for rows.Next() {
 		var j LongRunningJob
+		var livyID sql.NullString
 
 		err := rows.Scan(
 			&j.ID, &j.WorkspaceID, &j.WorkspaceName,
 			&j.ItemID, &j.ItemDisplayName, &j.ItemType,
 			&j.JobType, &j.StartTime, &j.DurationMs,
 			&j.AvgDurationMs, &j.DeviationPct,
+			&livyID,
 		)
 		if err != nil {
 			return nil, err
 		}
 
+		if livyID.Valid {
+			j.LivyID = &livyID.String
+		}
+
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
+}
+
+// convertToMilliseconds converts duration values from Fabric API to milliseconds
+func convertToMilliseconds(value int, timeUnit string) int {
+	switch timeUnit {
+	case "Seconds":
+		return value * 1000
+	case "Minutes":
+		return value * 60000
+	case "Hours":
+		return value * 3600000
+	case "Milliseconds":
+		return value
+	default:
+		return value // Assume milliseconds if unknown
+	}
+}
+
+// SaveLivySessions saves Livy sessions using bulk DELETE+INSERT pattern for DuckDB performance
+func (db *Database) SaveLivySessions(sessions []NotebookSession) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Bulk DELETE existing sessions
+	livyIDs := make([]string, len(sessions))
+	for i, s := range sessions {
+		livyIDs[i] = s.LivyID
+	}
+
+	placeholders := make([]string, len(livyIDs))
+	args := make([]interface{}, len(livyIDs))
+	for i, id := range livyIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	deleteQuery := fmt.Sprintf("DELETE FROM notebook_sessions WHERE livy_id IN (%s)", strings.Join(placeholders, ","))
+	_, err = tx.Exec(deleteQuery, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing sessions: %w", err)
+	}
+
+	// Bulk INSERT new sessions
+	insertQuery := `
+		INSERT INTO notebook_sessions (
+			livy_id, job_instance_id, workspace_id, notebook_id,
+			spark_application_id, state, origin, attempt_number,
+			livy_name, submitter_id, submitter_type, item_name,
+			item_type, job_type, submitted_datetime, start_datetime,
+			end_datetime, queued_duration_ms, running_duration_ms,
+			total_duration_ms, cancellation_reason, capacity_id,
+			operation_name, consumer_identity_id, runtime_version,
+			is_high_concurrency, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, get_current_timestamp())
+	`
+
+	stmt, err := tx.Prepare(insertQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, s := range sessions {
+		_, err = stmt.Exec(
+			s.LivyID, s.JobInstanceID, s.WorkspaceID, s.NotebookID,
+			s.SparkApplicationID, s.State, s.Origin, s.AttemptNumber,
+			s.LivyName, s.SubmitterID, s.SubmitterType, s.ItemName,
+			s.ItemType, s.JobType, s.SubmittedDateTime, s.StartDateTime,
+			s.EndDateTime, s.QueuedDurationMs, s.RunningDurationMs,
+			s.TotalDurationMs, s.CancellationReason, s.CapacityID,
+			s.OperationName, s.ConsumerIdentityID, s.RuntimeVersion,
+			s.IsHighConcurrency,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert session %s: %w", s.LivyID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// GetLivyIDsByJobInstanceIDs returns a map of job instance ID -> livy ID for the given job IDs
+func (db *Database) GetLivyIDsByJobInstanceIDs(jobInstanceIDs []string) (map[string]string, error) {
+	if len(jobInstanceIDs) == 0 {
+		return make(map[string]string), nil
+	}
+
+	query := `
+		SELECT job_instance_id, livy_id
+		FROM notebook_sessions
+		WHERE job_instance_id = ANY(?)
+	`
+
+	rows, err := db.conn.Query(query, jobInstanceIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var jobInstanceID, livyID string
+		if err := rows.Scan(&jobInstanceID, &livyID); err != nil {
+			return nil, err
+		}
+		result[jobInstanceID] = livyID
+	}
+
+	return result, rows.Err()
+}
+
+// GetUniqueNotebooks returns unique notebook IDs and their workspace IDs from job_instances
+func (db *Database) GetUniqueNotebooks() ([]struct{ WorkspaceID, NotebookID string }, error) {
+	query := `
+		SELECT DISTINCT j.workspace_id, j.item_id
+		FROM job_instances j
+		INNER JOIN items i ON j.item_id = i.id
+		WHERE i.type = 'Notebook'
+	`
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notebooks []struct{ WorkspaceID, NotebookID string }
+	for rows.Next() {
+		var nb struct{ WorkspaceID, NotebookID string }
+		if err := rows.Scan(&nb.WorkspaceID, &nb.NotebookID); err != nil {
+			return nil, err
+		}
+		notebooks = append(notebooks, nb)
+	}
+
+	return notebooks, rows.Err()
 }

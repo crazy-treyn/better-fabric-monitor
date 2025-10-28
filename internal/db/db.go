@@ -134,6 +134,38 @@ func (db *Database) initSchema() error {
 	-- Create sequence for sync_metadata id
 	CREATE SEQUENCE IF NOT EXISTS sync_metadata_id_seq START 1;
 
+	-- Notebook sessions table (Livy sessions)
+	CREATE TABLE IF NOT EXISTS notebook_sessions (
+		livy_id VARCHAR PRIMARY KEY,
+		job_instance_id VARCHAR NOT NULL,
+		workspace_id VARCHAR NOT NULL,
+		notebook_id VARCHAR NOT NULL,
+		spark_application_id VARCHAR,
+		state VARCHAR NOT NULL,
+		origin VARCHAR,
+		attempt_number INTEGER,
+		livy_name VARCHAR,
+		submitter_id VARCHAR,
+		submitter_type VARCHAR,
+		item_name VARCHAR,
+		item_type VARCHAR,
+		job_type VARCHAR,
+		submitted_datetime TIMESTAMP,
+		start_datetime TIMESTAMP,
+		end_datetime TIMESTAMP,
+		queued_duration_ms INTEGER,
+		running_duration_ms INTEGER,
+		total_duration_ms INTEGER,
+		cancellation_reason VARCHAR,
+		capacity_id VARCHAR,
+		operation_name VARCHAR,
+		consumer_identity_id VARCHAR,
+		runtime_version VARCHAR,
+		is_high_concurrency BOOLEAN,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+
 	-- Sync metadata
 	CREATE TABLE IF NOT EXISTS sync_metadata (
 		id BIGINT PRIMARY KEY DEFAULT nextval('sync_metadata_id_seq'),

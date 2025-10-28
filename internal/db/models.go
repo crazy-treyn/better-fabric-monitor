@@ -72,11 +72,44 @@ type JobInstance struct {
 	RootActivityID  *string       `json:"rootActivityId,omitempty"` // Root activity id to trace requests across services
 	ActivityRuns    []ActivityRun `json:"activityRuns,omitempty"`   // Activity runs data for pipelines
 	ActivityCount   *int          `json:"activityCount,omitempty"`  // Count of activities
+	LivyID          *string       `json:"livyId,omitempty"`         // Livy session ID for notebooks
 	CreatedAt       time.Time     `json:"createdAt"`
 	UpdatedAt       time.Time     `json:"updatedAt"`
 	ItemDisplayName *string       `json:"itemDisplayName,omitempty"` // Joined from items table
 	ItemType        *string       `json:"itemType,omitempty"`        // Joined from items table
 	WorkspaceName   *string       `json:"workspaceName,omitempty"`   // Joined from workspaces table
+}
+
+// NotebookSession represents a Livy session for a notebook execution
+type NotebookSession struct {
+	LivyID             string     `json:"livyId"`
+	JobInstanceID      string     `json:"jobInstanceId"`
+	WorkspaceID        string     `json:"workspaceId"`
+	NotebookID         string     `json:"notebookId"`
+	SparkApplicationID *string    `json:"sparkApplicationId,omitempty"`
+	State              string     `json:"state"`
+	Origin             *string    `json:"origin,omitempty"`
+	AttemptNumber      *int       `json:"attemptNumber,omitempty"`
+	LivyName           *string    `json:"livyName,omitempty"`
+	SubmitterID        *string    `json:"submitterId,omitempty"`
+	SubmitterType      *string    `json:"submitterType,omitempty"`
+	ItemName           *string    `json:"itemName,omitempty"`
+	ItemType           *string    `json:"itemType,omitempty"`
+	JobType            *string    `json:"jobType,omitempty"`
+	SubmittedDateTime  *time.Time `json:"submittedDatetime,omitempty"`
+	StartDateTime      *time.Time `json:"startDatetime,omitempty"`
+	EndDateTime        *time.Time `json:"endDatetime,omitempty"`
+	QueuedDurationMs   *int       `json:"queuedDurationMs,omitempty"`
+	RunningDurationMs  *int       `json:"runningDurationMs,omitempty"`
+	TotalDurationMs    *int       `json:"totalDurationMs,omitempty"`
+	CancellationReason *string    `json:"cancellationReason,omitempty"`
+	CapacityID         *string    `json:"capacityId,omitempty"`
+	OperationName      *string    `json:"operationName,omitempty"`
+	ConsumerIdentityID *string    `json:"consumerIdentityId,omitempty"`
+	RuntimeVersion     *string    `json:"runtimeVersion,omitempty"`
+	IsHighConcurrency  *bool      `json:"isHighConcurrency,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 // ChildExecution represents a child pipeline or notebook execution
@@ -98,6 +131,7 @@ type ChildExecution struct {
 	ChildItemID          *string    `json:"childItemId,omitempty"`
 	ChildItemType        *string    `json:"childItemType,omitempty"`
 	ChildItemDisplayName *string    `json:"childItemDisplayName,omitempty"`
+	LivyID               *string    `json:"livyId,omitempty"`
 }
 
 // PipelineRun represents a pipeline run
@@ -194,6 +228,7 @@ type RecentFailure struct {
 	EndTime         time.Time `json:"endTime"`
 	DurationMs      int64     `json:"durationMs"`
 	FailureReason   string    `json:"failureReason"`
+	LivyID          *string   `json:"livyId,omitempty"`
 }
 
 // LongRunningJob represents jobs with unusually long durations
@@ -209,6 +244,7 @@ type LongRunningJob struct {
 	DurationMs      int64     `json:"durationMs"`
 	AvgDurationMs   float64   `json:"avgDurationMs"`
 	DeviationPct    float64   `json:"deviationPct"`
+	LivyID          *string   `json:"livyId,omitempty"`
 }
 
 // ItemStats represents job statistics by individual item

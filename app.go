@@ -577,20 +577,6 @@ func (a *App) GetJobs() []map[string]interface{} {
 		}
 	}
 
-	// Add Fabric deep link URLs to jobs
-	for i := range jobs {
-		job := jobs[i]
-		workspaceID, _ := job["workspaceId"].(string)
-		itemID, _ := job["itemId"].(string)
-		itemType, _ := job["itemType"].(string)
-		jobID, _ := job["id"].(string)
-
-		fabricURL := utils.GenerateFabricURL(workspaceID, itemID, itemType, jobID)
-		if fabricURL != "" {
-			jobs[i]["fabricUrl"] = fabricURL
-		}
-	}
-
 	// If doing incremental sync, get cached jobs BEFORE persisting to database
 	var cachedJobs []map[string]interface{}
 	if startTimeFrom != nil && a.db != nil {
@@ -707,6 +693,49 @@ func (a *App) GetJobs() []map[string]interface{} {
 	// We do this AFTER the persistence block to ensure all jobs are committed to the database
 	if a.db != nil && len(jobs) > 0 {
 		a.enrichPipelineJobsWithActivityRuns()
+
+		// Sync notebook sessions to get livyID for notebook deep links
+		// This runs synchronously to ensure all livyIDs are available before UI loads
+		if err := a.SyncNotebookSessions(); err != nil {
+			Log("Warning: failed to sync notebook sessions: %v\n", err)
+		}
+
+		// Now get livyIDs from database and add Fabric deep link URLs to jobs
+		jobIDs := make([]string, 0, len(jobs))
+		for _, job := range jobs {
+			if jobID, ok := job["id"].(string); ok {
+				jobIDs = append(jobIDs, jobID)
+			}
+		}
+
+		livyIDMap := make(map[string]string)
+		if len(jobIDs) > 0 {
+			var err error
+			livyIDMap, err = a.db.GetLivyIDsByJobInstanceIDs(jobIDs)
+			if err != nil {
+				Log("Warning: failed to get livyIDs from database: %v\n", err)
+			}
+		}
+
+		// Add Fabric deep link URLs to all jobs
+		for i := range jobs {
+			job := jobs[i]
+			workspaceID, _ := job["workspaceId"].(string)
+			itemID, _ := job["itemId"].(string)
+			itemType, _ := job["itemType"].(string)
+			jobID, _ := job["id"].(string)
+
+			// Check if we have a livyID for this job
+			var livyIDPtr *string
+			if livyID, exists := livyIDMap[jobID]; exists && livyID != "" {
+				livyIDPtr = &livyID
+			}
+
+			fabricURL := utils.GenerateFabricURL(workspaceID, itemID, itemType, jobID, livyIDPtr)
+			if fabricURL != "" {
+				jobs[i]["fabricUrl"] = fabricURL
+			}
+		}
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
@@ -804,7 +833,7 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		}
 
 		// Generate Fabric deep link URL
-		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID)
+		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
 		if fabricURL != "" {
 			jobMap["fabricUrl"] = fabricURL
 		}
@@ -927,7 +956,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 				"failureReason":   failure.FailureReason,
 			}
 
-			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID)
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID, failure.LivyID)
 			if fabricURL != "" {
 				failureMap["fabricUrl"] = fabricURL
 			}
@@ -960,7 +989,7 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 				"deviationPct":    job.DeviationPct,
 			}
 
-			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID)
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID, job.LivyID)
 			if fabricURL != "" {
 				jobMap["fabricUrl"] = fabricURL
 			}
@@ -1055,7 +1084,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 				"failureReason":   failure.FailureReason,
 			}
 
-			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID)
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID, failure.LivyID)
 			if fabricURL != "" {
 				failureMap["fabricUrl"] = fabricURL
 			}
@@ -1088,7 +1117,7 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 				"deviationPct":    job.DeviationPct,
 			}
 
-			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID)
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID, job.LivyID)
 			if fabricURL != "" {
 				jobMap["fabricUrl"] = fabricURL
 			}
@@ -1456,7 +1485,7 @@ func (a *App) GetChildExecutions(jobID string) map[string]interface{} {
 				itemType = *child.ChildItemType
 			}
 
-			fabricURL := utils.GenerateFabricURL(*child.ChildWorkspaceID, itemID, itemType, *child.ChildJobInstanceID)
+			fabricURL := utils.GenerateFabricURL(*child.ChildWorkspaceID, itemID, itemType, *child.ChildJobInstanceID, child.LivyID)
 			if fabricURL != "" {
 				childMap["fabricUrl"] = fabricURL
 			}
@@ -1504,6 +1533,175 @@ func (a *App) GetActivityRunsSample() map[string]interface{} {
 		"jobID":        jobID,
 		"displayName":  displayName,
 		"activityRuns": activityRunsJSON,
+	}
+}
+
+// SyncNotebookSessions fetches and stores Livy session information for all notebooks
+// This allows generating correct notebook deep links using livyID
+func (a *App) SyncNotebookSessions() error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if a.fabricClient == nil {
+		return fmt.Errorf("fabric client not initialized")
+	}
+
+	Log("Starting notebook sessions sync...\n")
+
+	// Get all unique notebooks from job_instances
+	notebooks, err := a.db.GetUniqueNotebooks()
+	if err != nil {
+		return fmt.Errorf("failed to get unique notebooks: %w", err)
+	}
+
+	Log("Found %d unique notebooks to sync\n", len(notebooks))
+
+	totalSessions := 0
+	for _, notebook := range notebooks {
+		continuationToken := ""
+		notebookSessions := 0
+
+		// Paginate through all Livy sessions for this notebook
+		for {
+			response, err := a.fabricClient.GetLivySessions(a.ctx, notebook.WorkspaceID, notebook.NotebookID, continuationToken)
+			if err != nil {
+				Log("Warning: failed to get Livy sessions for notebook %s: %v\n", notebook.NotebookID, err)
+				break // Skip this notebook and continue with others
+			}
+
+			if response == nil || len(response.Value) == 0 {
+				break
+			}
+
+			// Convert fabric.LivySession to db.NotebookSession
+			dbSessions := make([]db.NotebookSession, 0, len(response.Value))
+			for _, livySession := range response.Value {
+				dbSession := db.NotebookSession{
+					LivyID:        livySession.LivyID,
+					JobInstanceID: livySession.JobInstanceID,
+					WorkspaceID:   notebook.WorkspaceID,
+					NotebookID:    notebook.NotebookID,
+					State:         livySession.State, // Required non-pointer field
+				}
+
+				// Handle optional string fields
+				if livySession.SparkApplicationID != "" {
+					dbSession.SparkApplicationID = &livySession.SparkApplicationID
+				}
+				if livySession.Origin != "" {
+					dbSession.Origin = &livySession.Origin
+				}
+				if livySession.AttemptNumber != 0 {
+					dbSession.AttemptNumber = &livySession.AttemptNumber
+				}
+				if livySession.LivyName != "" {
+					dbSession.LivyName = &livySession.LivyName
+				}
+				if livySession.CancellationReason != "" {
+					dbSession.CancellationReason = &livySession.CancellationReason
+				}
+				if livySession.CapacityID != "" {
+					dbSession.CapacityID = &livySession.CapacityID
+				}
+				if livySession.OperationName != "" {
+					dbSession.OperationName = &livySession.OperationName
+				}
+				if livySession.RuntimeVersion != "" {
+					dbSession.RuntimeVersion = &livySession.RuntimeVersion
+				}
+				dbSession.IsHighConcurrency = &livySession.IsHighConcurrency
+
+				// Handle FabricTime fields
+				if !livySession.SubmittedDateTime.Time.IsZero() {
+					dbSession.SubmittedDateTime = &livySession.SubmittedDateTime.Time
+				}
+				if !livySession.StartDateTime.Time.IsZero() {
+					dbSession.StartDateTime = &livySession.StartDateTime.Time
+				}
+				if !livySession.EndDateTime.Time.IsZero() {
+					dbSession.EndDateTime = &livySession.EndDateTime.Time
+				}
+
+				// Extract submitter info
+				if livySession.Submitter.ID != "" {
+					dbSession.SubmitterID = &livySession.Submitter.ID
+				}
+				if livySession.Submitter.Type != "" {
+					dbSession.SubmitterType = &livySession.Submitter.Type
+				}
+
+				// Extract item info from top-level fields (not nested Item struct)
+				if livySession.ItemName != "" {
+					dbSession.ItemName = &livySession.ItemName
+				}
+				if livySession.ItemType != "" {
+					dbSession.ItemType = &livySession.ItemType
+				}
+				if livySession.JobType != "" {
+					dbSession.JobType = &livySession.JobType
+				}
+
+				// Convert durations to milliseconds
+				if livySession.QueuedDuration.Value > 0 {
+					ms := convertToMs(livySession.QueuedDuration.Value, livySession.QueuedDuration.TimeUnit)
+					dbSession.QueuedDurationMs = &ms
+				}
+				if livySession.RunningDuration.Value > 0 {
+					ms := convertToMs(livySession.RunningDuration.Value, livySession.RunningDuration.TimeUnit)
+					dbSession.RunningDurationMs = &ms
+				}
+				if livySession.TotalDuration.Value > 0 {
+					ms := convertToMs(livySession.TotalDuration.Value, livySession.TotalDuration.TimeUnit)
+					dbSession.TotalDurationMs = &ms
+				}
+
+				// Extract consumer identity ID
+				if livySession.ConsumerIdentity.ID != "" {
+					dbSession.ConsumerIdentityID = &livySession.ConsumerIdentity.ID
+				}
+
+				dbSessions = append(dbSessions, dbSession)
+			}
+
+			// Save sessions to database
+			if len(dbSessions) > 0 {
+				if err := a.db.SaveLivySessions(dbSessions); err != nil {
+					Log("Warning: failed to save Livy sessions for notebook %s: %v\n", notebook.NotebookID, err)
+					break
+				}
+				notebookSessions += len(dbSessions)
+				totalSessions += len(dbSessions)
+			}
+
+			// Check if there are more pages
+			if response.ContinuationToken == "" {
+				break
+			}
+			continuationToken = response.ContinuationToken
+		}
+
+		if notebookSessions > 0 {
+			Log("Synced %d sessions for notebook %s\n", notebookSessions, notebook.NotebookID)
+		}
+	}
+
+	Log("Notebook sessions sync complete: %d total sessions synced\n", totalSessions)
+	return nil
+}
+
+// convertToMs converts duration from Fabric API to milliseconds
+func convertToMs(value int, timeUnit string) int {
+	switch timeUnit {
+	case "Seconds":
+		return value * 1000
+	case "Minutes":
+		return value * 60000
+	case "Hours":
+		return value * 3600000
+	case "Milliseconds":
+		return value
+	default:
+		return value // Assume milliseconds if unknown
 	}
 }
 
