@@ -24,31 +24,6 @@ func (db *Database) SaveWorkspace(workspace *Workspace) error {
 	return err
 }
 
-// BatchSaveWorkspaces saves or updates multiple workspaces using DuckDB appender within a single transaction
-func (db *Database) BatchSaveWorkspaces(workspaces []Workspace) error {
-	if len(workspaces) == 0 {
-		return nil
-	}
-
-	// Execute DELETE + INSERT in a single transaction
-	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
-		// Extract IDs for deletion
-		ids := extractWorkspaceIDs(workspaces)
-
-		// Delete existing records in bulk (for upsert behavior)
-		if err := bulkDeleteByIDsWithConn(driverConn, "workspaces", ids); err != nil {
-			return err
-		}
-
-		// Use appender for bulk insert (within the same transaction)
-		if err := appendWorkspaces(driverConn, workspaces); err != nil {
-			return err
-		}
-
-		return nil
-	})
-}
-
 // GetWorkspaces retrieves all workspaces
 func (db *Database) GetWorkspaces() ([]Workspace, error) {
 	query := `
@@ -87,31 +62,6 @@ func (db *Database) SaveItem(item *Item) error {
 	`
 	_, err := db.conn.Exec(query, item.ID, item.WorkspaceID, item.DisplayName, item.Type, item.Description)
 	return err
-}
-
-// BatchSaveItems saves or updates multiple items using DuckDB appender within a single transaction
-func (db *Database) BatchSaveItems(items []Item) error {
-	if len(items) == 0 {
-		return nil
-	}
-
-	// Execute DELETE + INSERT in a single transaction
-	return executeInTransaction(db.conn, func(driverConn driver.Conn) error {
-		// Extract IDs for deletion
-		ids := extractItemIDs(items)
-
-		// Delete existing records in bulk (for upsert behavior)
-		if err := bulkDeleteByIDsWithConn(driverConn, "items", ids); err != nil {
-			return err
-		}
-
-		// Use appender for bulk insert (within the same transaction)
-		if err := appendItems(driverConn, items); err != nil {
-			return err
-		}
-
-		return nil
-	})
 }
 
 // GetItemsByWorkspace retrieves items for a specific workspace
@@ -550,36 +500,6 @@ func (db *Database) GetOverallStats(days int) (*JobStats, error) {
 	return &stats, nil
 }
 
-// GetJobStats returns aggregated statistics
-func (db *Database) GetJobStats(workspaceID string, from, to time.Time) (*JobStats, error) {
-	query := `
-		SELECT
-			COUNT(*) as total_jobs,
-			COALESCE(SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END), 0) as successful,
-			COALESCE(SUM(CASE WHEN status = 'Failed' THEN 1 ELSE 0 END), 0) as failed,
-			AVG(duration_ms) as avg_duration_ms
-		FROM job_instances
-		WHERE workspace_id = ? AND start_time >= ? AND start_time <= ?
-	`
-
-	var stats JobStats
-	err := db.conn.QueryRow(query, workspaceID, from, to).Scan(
-		&stats.TotalJobs, &stats.Successful, &stats.Failed, &stats.AvgDurationMs,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return &JobStats{}, nil
-		}
-		return nil, err
-	}
-
-	if stats.TotalJobs > 0 {
-		stats.SuccessRate = float64(stats.Successful) / float64(stats.TotalJobs) * 100
-	}
-
-	return &stats, nil
-}
-
 // UpdateSyncMetadata records a sync operation
 func (db *Database) UpdateSyncMetadata(syncType string, recordsSynced, errors int) error {
 	query := `
@@ -653,31 +573,6 @@ func (db *Database) GetMaxJobStartTime() (*time.Time, error) {
 
 	// No jobs at all
 	return nil, nil
-}
-
-// GetInProgressJobIDs returns IDs of jobs that don't have an end time (still in progress)
-func (db *Database) GetInProgressJobIDs() ([]string, error) {
-	query := `
-		SELECT id
-		FROM job_instances
-		WHERE end_time IS NULL
-	`
-
-	rows, err := db.conn.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // GetDailyStats returns job statistics grouped by day for the last N days
@@ -1114,37 +1009,6 @@ func (db *Database) GetItemStatsByDate(date string, workspaceIDs []string, itemT
 	return stats, rows.Err()
 }
 
-// GetInProgressJobsByWorkspaceAndItem returns job instances that are in progress for a specific workspace/item
-func (db *Database) GetInProgressJobsByWorkspaceAndItem(workspaceID, itemID string) ([]JobInstance, error) {
-	query := `
-		SELECT id, workspace_id, item_id, job_type, status, start_time,
-			   end_time, duration_ms, failure_reason, invoker_type, root_activity_id, created_at, updated_at
-		FROM job_instances
-		WHERE workspace_id = ? AND item_id = ? AND end_time IS NULL
-		ORDER BY start_time DESC
-	`
-
-	rows, err := db.conn.Query(query, workspaceID, itemID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var jobs []JobInstance
-	for rows.Next() {
-		var job JobInstance
-		err := rows.Scan(
-			&job.ID, &job.WorkspaceID, &job.ItemID, &job.JobType, &job.Status, &job.StartTime,
-			&job.EndTime, &job.DurationMs, &job.FailureReason, &job.InvokerType, &job.RootActivityID, &job.CreatedAt, &job.UpdatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		jobs = append(jobs, job)
-	}
-	return jobs, rows.Err()
-}
-
 // buildFilterConditions builds WHERE clause conditions for analytics queries
 func buildFilterConditions(workspaceIDs []string, itemTypes []string, itemNameSearch string) (string, []interface{}) {
 	var conditions []string
@@ -1576,22 +1440,6 @@ func (db *Database) GetLongRunningJobsFiltered(days int, minDeviationPct float64
 		jobs = append(jobs, j)
 	}
 	return jobs, rows.Err()
-}
-
-// convertToMilliseconds converts duration values from Fabric API to milliseconds
-func convertToMilliseconds(value int, timeUnit string) int {
-	switch timeUnit {
-	case "Seconds":
-		return value * 1000
-	case "Minutes":
-		return value * 60000
-	case "Hours":
-		return value * 3600000
-	case "Milliseconds":
-		return value
-	default:
-		return value // Assume milliseconds if unknown
-	}
 }
 
 // SaveLivySessions saves Livy sessions using DuckDB appender within a single transaction
