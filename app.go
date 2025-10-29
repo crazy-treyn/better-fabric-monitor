@@ -161,7 +161,7 @@ func (a *App) startup(ctx context.Context) {
 			},
 			App: config.AppConfig{
 				Name:     "Better Fabric Monitor",
-				Version:  "0.2.0",
+				Version:  "0.2.2",
 				LogLevel: "info",
 				Debug:    false,
 			},
@@ -1500,42 +1500,6 @@ func (a *App) GetChildExecutions(jobID string) map[string]interface{} {
 	}
 }
 
-// GetActivityRunsSample returns a sample of activity runs for debugging (first DataPipeline with activity runs)
-func (a *App) GetActivityRunsSample() map[string]interface{} {
-	if a.db == nil {
-		return map[string]interface{}{
-			"error": "Database not initialized",
-		}
-	}
-
-	query := `
-		SELECT j.id, i.display_name, j.activity_runs
-		FROM job_instances j
-		LEFT JOIN items i ON j.item_id = i.id
-		WHERE i.type = 'DataPipeline'
-			AND j.activity_runs IS NOT NULL
-			AND json_array_length(CAST(j.activity_runs AS JSON[])) > 0
-		LIMIT 1
-	`
-
-	var jobID string
-	var displayName string
-	var activityRunsJSON string
-
-	err := a.db.GetConnection().QueryRow(query).Scan(&jobID, &displayName, &activityRunsJSON)
-	if err != nil {
-		return map[string]interface{}{
-			"error": fmt.Sprintf("No pipeline jobs with activity runs found: %v", err),
-		}
-	}
-
-	return map[string]interface{}{
-		"jobID":        jobID,
-		"displayName":  displayName,
-		"activityRuns": activityRunsJSON,
-	}
-}
-
 // SyncNotebookSessions fetches and stores Livy session information for all notebooks
 // This allows generating correct notebook deep links using livyID
 func (a *App) SyncNotebookSessions() error {
@@ -1772,10 +1736,5 @@ func (a *App) GetAppVersion() string {
 	if a.config != nil && a.config.App.Version != "" {
 		return a.config.App.Version
 	}
-	return "0.2.0" // Fallback version
-}
-
-// Greet returns a greeting for the given name (legacy method)
-func (a *App) Greet(name string) string {
-	return fmt.Sprintf("Hello %s, It's show time!", name)
+	return "0.2.2" // Fallback version
 }

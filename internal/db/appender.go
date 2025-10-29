@@ -111,29 +111,6 @@ func bulkDeleteByColumnWithConn(driverConn driver.Conn, tableName string, column
 	return nil
 }
 
-// bulkDeleteByIDs performs a bulk DELETE operation for records with the given IDs (deprecated - use bulkDeleteByIDsWithConn)
-func bulkDeleteByIDs(tx *sql.Tx, tableName string, ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-
-	// Build placeholders for the IN clause
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, strings.Join(placeholders, ","))
-	_, err := tx.Exec(query, args...)
-	if err != nil {
-		return fmt.Errorf("failed to delete existing records from %s: %w", tableName, err)
-	}
-
-	return nil
-}
-
 // extractJobInstanceIDs extracts IDs from a slice of JobInstance
 func extractJobInstanceIDs(jobs []JobInstance) []string {
 	ids := make([]string, len(jobs))

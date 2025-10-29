@@ -89,14 +89,20 @@ git checkout -b release/v[VERSION] main
 Update these files:
 1. `wails.json` → `info.productVersion`
 2. `internal/config/config.go` → `viper.SetDefault("app.version", "[VERSION]")`
+3. `app.go` → **TWO locations:**
+   - Line ~164: Default config fallback in `startup()` function → `Version: "[VERSION]"`
+   - Line ~1739: `GetAppVersion()` function fallback return value → `return "[VERSION]"`
+4. `frontend/package.json` → `version`
 
 **Tools:**
-- `replace_string_in_file` for both files
+- `replace_string_in_file` for all files
+
+**Important:** `app.go` has TWO hardcoded version strings that must both be updated!
 
 ### **1.5 Commit Changes**
 
 ```powershell
-git add wails.json internal/config/config.go
+git add wails.json internal/config/config.go app.go frontend/package.json
 git commit -m "Bump version to [VERSION]"
 git push origin release/v[VERSION]
 ```
@@ -128,6 +134,8 @@ Version bump for upcoming release.
 ### Files Modified
 - \`wails.json\` - Updated productVersion to [VERSION]
 - \`internal/config/config.go\` - Updated app.version to [VERSION]
+- \`app.go\` - Updated fallback versions to [VERSION] (2 locations: startup() and GetAppVersion())
+- \`frontend/package.json\` - Updated version to [VERSION]
 
 ### Checklist
 - [x] Version bumped in all required files
@@ -193,9 +201,12 @@ git pull origin main
 Read and confirm:
 - `wails.json` shows version [VERSION]
 - `internal/config/config.go` shows version [VERSION]
+- `app.go` shows version [VERSION] in BOTH locations (line ~164 and ~1739)
+- `frontend/package.json` shows version [VERSION]
 
 **Tools:**
-- `read_file` for both files
+- `read_file` for all files
+- `grep_search` to verify both occurrences in app.go are updated
 
 ### **4.3 Check Existing Tags**
 

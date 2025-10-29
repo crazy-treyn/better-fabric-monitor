@@ -134,21 +134,6 @@ type ChildExecution struct {
 	LivyID               *string    `json:"livyId,omitempty"`
 }
 
-// PipelineRun represents a pipeline run
-type PipelineRun struct {
-	RunID        string     `json:"runId"`
-	WorkspaceID  string     `json:"workspaceId"`
-	PipelineID   string     `json:"pipelineId"`
-	PipelineName string     `json:"pipelineName"`
-	Status       string     `json:"status"`
-	StartTime    time.Time  `json:"startTime"`
-	EndTime      *time.Time `json:"endTime,omitempty"`
-	DurationMs   *int64     `json:"durationMs,omitempty"`
-	ErrorMessage *string    `json:"errorMessage,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-}
-
 // SyncMetadata tracks sync operations
 type SyncMetadata struct {
 	ID            int64     `json:"id"`
