@@ -68,9 +68,19 @@ type Client struct {
 
 // NewClient creates a new Fabric API client
 func NewClient(accessToken string) *Client {
+	// Configure HTTP transport with proper connection management
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // Maximum idle connections across all hosts
+		MaxIdleConnsPerHost: 10,               // Maximum idle connections per host
+		IdleConnTimeout:     90 * time.Second, // How long idle connections stay open
+		DisableKeepAlives:   false,            // Keep connections alive for reuse
+		ForceAttemptHTTP2:   true,             // Prefer HTTP/2 when available
+	}
+
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		},
 		baseURL:     "https://api.fabric.microsoft.com/v1",
 		accessToken: accessToken,
