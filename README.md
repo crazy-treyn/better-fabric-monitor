@@ -29,11 +29,7 @@ If you've struggled with Fabric's limited monitoring capabilities, you're not al
 - **Hierarchical execution view** - Drill into pipeline executions to see child activities and nested pipeline calls
 - **Advanced filtering** - Search by job name, filter by type, status, or workspace
 - **Multi-workspace selection** - Monitor multiple workspaces simultaneously
-
-### 🔗 Direct Fabric Portal Integration
-- **One-click deep links** - Click any job to open it directly in the Microsoft Fabric portal
-- **Seamless investigation** - Jump from monitoring to detailed portal views instantly
-- **Opens in default browser** - Links use the 'fabric-developer' experience for quick access
+- **One-click deep links** - Click any job run to open it directly in the Microsoft Fabric portal Monitor app in your default browser
 
 ### 📈 Powerful Analytics Dashboard
 Get insights that Fabric doesn't give you out of the box:
@@ -66,8 +62,7 @@ Every chart is clickable - drill down from high-level metrics to item-specific d
 
 ### 💾 Your Data, Your Control
 - All data stored locally in a DuckDB database at `data/fabric-monitor.db`
-- Run your own custom SQL queries for advanced analysis
-- Export capabilities for reporting
+- Use external tools to run your own custom SQL queries for advanced analysis
 
 ## Getting Started
 
