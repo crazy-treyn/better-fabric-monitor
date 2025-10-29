@@ -66,15 +66,11 @@
                         type="text"
                         bind:value={tenantId}
                         on:keypress={handleKeyPress}
-                        placeholder="Enter your Azure tenant ID (e.g., contoso.onmicrosoft.com or GUID)"
+                        placeholder="Enter your Azure tenant ID (GUID)"
                         class="w-full px-3 py-2 border border-slate-600 rounded-md shadow-sm bg-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                         disabled={isLoading}
                         required
                     />
-                    <p class="mt-1 text-sm text-slate-400">
-                        You can find this in your Azure portal under Azure
-                        Active Directory → Properties
-                    </p>
                 </div>
 
                 {#if $authStore.error}
@@ -183,11 +179,33 @@
                 </button>
             </form>
 
+            <!-- Offline Mode Option -->
+            <div class="mt-4">
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-slate-600"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-slate-800 text-slate-400">or</span>
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    on:click={() => authActions.continueOffline()}
+                    class="mt-4 w-full flex justify-center py-2 px-4 border border-slate-600 rounded-md shadow-sm text-sm font-medium text-slate-300 bg-slate-700 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors"
+                >
+                    Continue Without Sign In
+                </button>
+                <p class="mt-2 text-xs text-slate-400 text-center">
+                    View cached data without connecting to Microsoft Fabric
+                </p>
+            </div>
+
             <!-- Help Text -->
             <div class="mt-6 text-center">
                 <p class="text-sm text-slate-400">
-                    This app requires Fabric.ReadWrite.All permissions in your
-                    Azure app registration.
+                    This app requires Fabric.ReadWrite.All permissions with your
+                    Entra ID account.
                 </p>
             </div>
         </div>

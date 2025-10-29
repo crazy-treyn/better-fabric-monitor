@@ -11,6 +11,7 @@ import (
 	"better-fabric-monitor/internal/config"
 	"better-fabric-monitor/internal/db"
 	"better-fabric-monitor/internal/fabric"
+	"better-fabric-monitor/internal/utils"
 )
 
 // LogEntry represents a single log entry
@@ -331,6 +332,37 @@ func (a *App) Logout() error {
 	return nil
 }
 
+// ensureValidToken checks if the current token is valid and refreshes if needed
+// Returns error if token refresh fails (requires re-authentication)
+func (a *App) ensureValidToken() error {
+	// If no auth manager, cannot proceed
+	if a.auth == nil {
+		return fmt.Errorf("authentication not initialized")
+	}
+
+	// Check if token exists and is not expired (5-minute buffer)
+	if a.currentToken != nil && time.Now().Before(a.currentToken.ExpiresAt.Add(-5*time.Minute)) {
+		// Token is still valid
+		return nil
+	}
+
+	Log("Token expired or about to expire, refreshing...\n")
+
+	// Try to refresh token silently
+	token, err := a.auth.GetToken(a.ctx)
+	if err != nil {
+		Log("ERROR: Token refresh failed: %v\n", err)
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	// Update token and recreate Fabric client
+	a.currentToken = token
+	a.fabricClient = fabric.NewClient(token.AccessToken)
+	Log("Token refreshed successfully, expires at: %s\n", token.ExpiresAt.Format(time.RFC3339))
+
+	return nil
+}
+
 // IsAuthenticated checks if user is authenticated
 func (a *App) IsAuthenticated() bool {
 	if a.auth != nil {
@@ -350,27 +382,32 @@ func (a *App) GetUserInfo() map[string]interface{} {
 
 // GetWorkspaces returns available workspaces
 func (a *App) GetWorkspaces() []map[string]interface{} {
-	if a.fabricClient == nil {
-		Log("Fabric client not initialized, checking cache...")
-		// Try to load from cache first
+	// Check and refresh token if needed
+	if err := a.ensureValidToken(); err != nil {
+		Log("Authentication required: %v\n", err)
+		// Check if we have cached data
 		cachedWorkspaces := a.GetWorkspacesFromCache()
-		if len(cachedWorkspaces) > 0 {
-			Log("Loaded %d workspaces from cache\n", len(cachedWorkspaces))
-			return cachedWorkspaces
+		hasCachedData := len(cachedWorkspaces) > 0
+
+		if hasCachedData {
+			Log("Loaded %d workspaces from cache (authentication expired)\n", len(cachedWorkspaces))
+			// Return cached data with error flag
+			return append([]map[string]interface{}{
+				{
+					"error":                 "authentication_required",
+					"message":               "Your session has expired. Please sign in again or continue with cached data.",
+					"cached_data_available": true,
+					"_is_error_marker":      true, // Special flag so frontend can filter this out
+				},
+			}, cachedWorkspaces...)
 		}
 
-		// No cache, return mock data
-		Log("No cached workspaces, returning mock data")
+		// No cached data, return error only
 		return []map[string]interface{}{
 			{
-				"id":          "workspace-1",
-				"displayName": "Production Workspace",
-				"type":        "Workspace",
-			},
-			{
-				"id":          "workspace-2",
-				"displayName": "Development Workspace",
-				"type":        "Workspace",
+				"error":                 "authentication_required",
+				"message":               "Your session has expired. Please sign in again.",
+				"cached_data_available": false,
 			},
 		}
 	}
@@ -429,40 +466,32 @@ func (a *App) GetWorkspaces() []map[string]interface{} {
 
 // GetJobs returns recent jobs
 func (a *App) GetJobs() []map[string]interface{} {
-	if a.fabricClient == nil {
-		Log("Fabric client not initialized, returning mock data")
+	// Check and refresh token if needed
+	if err := a.ensureValidToken(); err != nil {
+		Log("Authentication required: %v\n", err)
+		// Check if we have cached data
+		cachedJobs := a.GetJobsFromCache()
+		hasCachedData := len(cachedJobs) > 0
+
+		if hasCachedData {
+			Log("Loaded %d jobs from cache (authentication expired)\n", len(cachedJobs))
+			// Return cached data with error flag
+			return append([]map[string]interface{}{
+				{
+					"error":                 "authentication_required",
+					"message":               "Your session has expired. Please sign in again or continue with cached data.",
+					"cached_data_available": true,
+					"_is_error_marker":      true, // Special flag so frontend can filter this out
+				},
+			}, cachedJobs...)
+		}
+
+		// No cached data, return error only
 		return []map[string]interface{}{
 			{
-				"id":              "job-1",
-				"workspaceId":     "workspace-1",
-				"itemId":          "pipeline-1",
-				"itemDisplayName": "Daily ETL Pipeline",
-				"jobType":         "Pipeline",
-				"status":          "Completed",
-				"startTime":       time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
-				"endTime":         time.Now().Add(-50 * time.Minute).Format(time.RFC3339),
-				"durationMs":      600000,
-			},
-			{
-				"id":              "job-2",
-				"workspaceId":     "workspace-1",
-				"itemId":          "notebook-1",
-				"itemDisplayName": "Data Analysis Notebook",
-				"jobType":         "Notebook",
-				"status":          "Failed",
-				"startTime":       time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
-				"endTime":         time.Now().Add(-1*time.Hour - 30*time.Minute).Format(time.RFC3339),
-				"durationMs":      5400000,
-				"failureReason":   "Connection timeout",
-			},
-			{
-				"id":              "job-3",
-				"workspaceId":     "workspace-2",
-				"itemId":          "pipeline-2",
-				"itemDisplayName": "Test Pipeline",
-				"jobType":         "Pipeline",
-				"status":          "Running",
-				"startTime":       time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+				"error":                 "authentication_required",
+				"message":               "Your session has expired. Please sign in again.",
+				"cached_data_available": false,
 			},
 		}
 	}
@@ -664,6 +693,49 @@ func (a *App) GetJobs() []map[string]interface{} {
 	// We do this AFTER the persistence block to ensure all jobs are committed to the database
 	if a.db != nil && len(jobs) > 0 {
 		a.enrichPipelineJobsWithActivityRuns()
+
+		// Sync notebook sessions to get livyID for notebook deep links
+		// This runs synchronously to ensure all livyIDs are available before UI loads
+		if err := a.SyncNotebookSessions(); err != nil {
+			Log("Warning: failed to sync notebook sessions: %v\n", err)
+		}
+
+		// Now get livyIDs from database and add Fabric deep link URLs to jobs
+		jobIDs := make([]string, 0, len(jobs))
+		for _, job := range jobs {
+			if jobID, ok := job["id"].(string); ok {
+				jobIDs = append(jobIDs, jobID)
+			}
+		}
+
+		livyIDMap := make(map[string]string)
+		if len(jobIDs) > 0 {
+			var err error
+			livyIDMap, err = a.db.GetLivyIDsByJobInstanceIDs(jobIDs)
+			if err != nil {
+				Log("Warning: failed to get livyIDs from database: %v\n", err)
+			}
+		}
+
+		// Add Fabric deep link URLs to all jobs
+		for i := range jobs {
+			job := jobs[i]
+			workspaceID, _ := job["workspaceId"].(string)
+			itemID, _ := job["itemId"].(string)
+			itemType, _ := job["itemType"].(string)
+			jobID, _ := job["id"].(string)
+
+			// Check if we have a livyID for this job
+			var livyIDPtr *string
+			if livyID, exists := livyIDMap[jobID]; exists && livyID != "" {
+				livyIDPtr = &livyID
+			}
+
+			fabricURL := utils.GenerateFabricURL(workspaceID, itemID, itemType, jobID, livyIDPtr)
+			if fabricURL != "" {
+				jobs[i]["fabricUrl"] = fabricURL
+			}
+		}
 	}
 
 	// If doing incremental sync, merge with cached data to get complete view
@@ -733,10 +805,13 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
 		}
 
+		var itemType string
 		if job.ItemType != nil {
 			jobMap["itemType"] = *job.ItemType
+			itemType = *job.ItemType
 		} else {
 			jobMap["itemType"] = job.JobType // Fallback to job type
+			itemType = job.JobType
 		}
 
 		// Add workspace name from the joined data
@@ -755,6 +830,12 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 		}
 		if job.RootActivityID != nil {
 			jobMap["rootActivityId"] = *job.RootActivityID
+		}
+
+		// Generate Fabric deep link URL
+		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
+		if fabricURL != "" {
+			jobMap["fabricUrl"] = fabricURL
 		}
 
 		result = append(result, jobMap)
@@ -858,7 +939,31 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
-		result["recentFailures"] = recentFailures
+		// Add Fabric URLs to failures
+		failuresWithURLs := make([]map[string]interface{}, 0, len(recentFailures))
+		for _, failure := range recentFailures {
+			failureMap := map[string]interface{}{
+				"id":              failure.ID,
+				"workspaceId":     failure.WorkspaceID,
+				"workspaceName":   failure.WorkspaceName,
+				"itemId":          failure.ItemID,
+				"itemDisplayName": failure.ItemDisplayName,
+				"itemType":        failure.ItemType,
+				"jobType":         failure.JobType,
+				"startTime":       failure.StartTime.Format(time.RFC3339),
+				"endTime":         failure.EndTime.Format(time.RFC3339),
+				"durationMs":      failure.DurationMs,
+				"failureReason":   failure.FailureReason,
+			}
+
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID, failure.LivyID)
+			if fabricURL != "" {
+				failureMap["fabricUrl"] = fabricURL
+			}
+
+			failuresWithURLs = append(failuresWithURLs, failureMap)
+		}
+		result["recentFailures"] = failuresWithURLs
 	}
 
 	// Get long-running jobs (50% or more above average, last 10)
@@ -867,7 +972,31 @@ func (a *App) GetAnalytics(days int) map[string]interface{} {
 		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
-		result["longRunningJobs"] = longRunningJobs
+		// Add Fabric URLs to long-running jobs
+		jobsWithURLs := make([]map[string]interface{}, 0, len(longRunningJobs))
+		for _, job := range longRunningJobs {
+			jobMap := map[string]interface{}{
+				"id":              job.ID,
+				"workspaceId":     job.WorkspaceID,
+				"workspaceName":   job.WorkspaceName,
+				"itemId":          job.ItemID,
+				"itemDisplayName": job.ItemDisplayName,
+				"itemType":        job.ItemType,
+				"jobType":         job.JobType,
+				"startTime":       job.StartTime.Format(time.RFC3339),
+				"durationMs":      job.DurationMs,
+				"avgDurationMs":   job.AvgDurationMs,
+				"deviationPct":    job.DeviationPct,
+			}
+
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID, job.LivyID)
+			if fabricURL != "" {
+				jobMap["fabricUrl"] = fabricURL
+			}
+
+			jobsWithURLs = append(jobsWithURLs, jobMap)
+		}
+		result["longRunningJobs"] = jobsWithURLs
 	}
 
 	// Get overall stats - calculated entirely in DuckDB for consistency
@@ -938,7 +1067,31 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 		Log("Failed to get recent failures: %v\n", err)
 		result["recentFailuresError"] = err.Error()
 	} else {
-		result["recentFailures"] = recentFailures
+		// Add Fabric URLs to failures
+		failuresWithURLs := make([]map[string]interface{}, 0, len(recentFailures))
+		for _, failure := range recentFailures {
+			failureMap := map[string]interface{}{
+				"id":              failure.ID,
+				"workspaceId":     failure.WorkspaceID,
+				"workspaceName":   failure.WorkspaceName,
+				"itemId":          failure.ItemID,
+				"itemDisplayName": failure.ItemDisplayName,
+				"itemType":        failure.ItemType,
+				"jobType":         failure.JobType,
+				"startTime":       failure.StartTime.Format(time.RFC3339),
+				"endTime":         failure.EndTime.Format(time.RFC3339),
+				"durationMs":      failure.DurationMs,
+				"failureReason":   failure.FailureReason,
+			}
+
+			fabricURL := utils.GenerateFabricURL(failure.WorkspaceID, failure.ItemID, failure.ItemType, failure.ID, failure.LivyID)
+			if fabricURL != "" {
+				failureMap["fabricUrl"] = fabricURL
+			}
+
+			failuresWithURLs = append(failuresWithURLs, failureMap)
+		}
+		result["recentFailures"] = failuresWithURLs
 	}
 
 	// Get long-running jobs (50% or more above average, last 10)
@@ -947,7 +1100,31 @@ func (a *App) GetAnalyticsFiltered(days int, workspaceIDs []string, itemTypes []
 		Log("Failed to get long-running jobs: %v\n", err)
 		result["longRunningJobsError"] = err.Error()
 	} else {
-		result["longRunningJobs"] = longRunningJobs
+		// Add Fabric URLs to long-running jobs
+		jobsWithURLs := make([]map[string]interface{}, 0, len(longRunningJobs))
+		for _, job := range longRunningJobs {
+			jobMap := map[string]interface{}{
+				"id":              job.ID,
+				"workspaceId":     job.WorkspaceID,
+				"workspaceName":   job.WorkspaceName,
+				"itemId":          job.ItemID,
+				"itemDisplayName": job.ItemDisplayName,
+				"itemType":        job.ItemType,
+				"jobType":         job.JobType,
+				"startTime":       job.StartTime.Format(time.RFC3339),
+				"durationMs":      job.DurationMs,
+				"avgDurationMs":   job.AvgDurationMs,
+				"deviationPct":    job.DeviationPct,
+			}
+
+			fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, job.ItemType, job.ID, job.LivyID)
+			if fabricURL != "" {
+				jobMap["fabricUrl"] = fabricURL
+			}
+
+			jobsWithURLs = append(jobsWithURLs, jobMap)
+		}
+		result["longRunningJobs"] = jobsWithURLs
 	}
 
 	// Get overall stats - calculated entirely in DuckDB for consistency
@@ -1250,9 +1427,76 @@ func (a *App) GetChildExecutions(jobID string) map[string]interface{} {
 		}
 	}
 
+	// Convert to map format and add Fabric URLs
+	childrenMaps := make([]map[string]interface{}, 0, len(children))
+	for _, child := range children {
+		childMap := map[string]interface{}{
+			"activityRunId": child.ActivityRunID,
+			"activityName":  child.ActivityName,
+			"activityType":  child.ActivityType,
+			"status":        child.Status,
+			"pipelineId":    child.PipelineID,
+			"hasChildren":   child.HasChildren,
+		}
+
+		// Add optional time fields
+		if child.StartTime != nil {
+			childMap["activityRunStart"] = child.StartTime.Format(time.RFC3339)
+		}
+		if child.EndTime != nil {
+			childMap["activityRunEnd"] = child.EndTime.Format(time.RFC3339)
+		}
+		if child.DurationMs != nil {
+			childMap["durationMs"] = *child.DurationMs
+		}
+		if child.ErrorMessage != nil {
+			childMap["error"] = *child.ErrorMessage
+		}
+
+		// Add child execution details
+		if child.ChildJobInstanceID != nil {
+			childMap["childJobInstanceId"] = *child.ChildJobInstanceID
+		}
+		if child.ChildPipelineName != nil {
+			childMap["childPipelineName"] = *child.ChildPipelineName
+		}
+		if child.ChildItemDisplayName != nil {
+			childMap["childNotebookName"] = *child.ChildItemDisplayName // For notebooks
+		}
+		if child.ChildWorkspaceID != nil {
+			childMap["childWorkspaceId"] = *child.ChildWorkspaceID
+		}
+		if child.ChildItemID != nil {
+			childMap["childItemId"] = *child.ChildItemID
+		}
+		if child.ChildItemType != nil {
+			childMap["childItemType"] = *child.ChildItemType
+		}
+
+		// Generate Fabric deep link URL for child execution if we have the required info
+		if child.ChildJobInstanceID != nil && child.ChildWorkspaceID != nil {
+			var itemID string
+			var itemType string
+
+			if child.ChildItemID != nil {
+				itemID = *child.ChildItemID
+			}
+			if child.ChildItemType != nil {
+				itemType = *child.ChildItemType
+			}
+
+			fabricURL := utils.GenerateFabricURL(*child.ChildWorkspaceID, itemID, itemType, *child.ChildJobInstanceID, child.LivyID)
+			if fabricURL != "" {
+				childMap["fabricUrl"] = fabricURL
+			}
+		}
+
+		childrenMaps = append(childrenMaps, childMap)
+	}
+
 	return map[string]interface{}{
-		"children": children,
-		"count":    len(children),
+		"children": childrenMaps,
+		"count":    len(childrenMaps),
 	}
 }
 
@@ -1289,6 +1533,221 @@ func (a *App) GetActivityRunsSample() map[string]interface{} {
 		"jobID":        jobID,
 		"displayName":  displayName,
 		"activityRuns": activityRunsJSON,
+	}
+}
+
+// SyncNotebookSessions fetches and stores Livy session information for all notebooks
+// This allows generating correct notebook deep links using livyID
+func (a *App) SyncNotebookSessions() error {
+	if a.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if a.fabricClient == nil {
+		return fmt.Errorf("fabric client not initialized")
+	}
+
+	Log("Starting notebook sessions sync...\n")
+
+	// Get all unique notebooks from job_instances
+	notebooks, err := a.db.GetUniqueNotebooks()
+	if err != nil {
+		return fmt.Errorf("failed to get unique notebooks: %w", err)
+	}
+
+	Log("Found %d unique notebooks to sync\n", len(notebooks))
+
+	// Use worker pool to parallelize notebook session fetching
+	numWorkers := 4 // Process 4 notebooks concurrently
+	notebookChan := make(chan struct {
+		WorkspaceID string
+		NotebookID  string
+	}, len(notebooks))
+	resultsChan := make(chan int, len(notebooks))
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for notebook := range notebookChan {
+				sessionsCount := a.syncNotebookSessions(notebook.WorkspaceID, notebook.NotebookID)
+				resultsChan <- sessionsCount
+			}
+		}()
+	}
+
+	// Send notebooks to workers
+	for _, notebook := range notebooks {
+		notebookChan <- struct {
+			WorkspaceID string
+			NotebookID  string
+		}{
+			WorkspaceID: notebook.WorkspaceID,
+			NotebookID:  notebook.NotebookID,
+		}
+	}
+	close(notebookChan)
+
+	// Wait for all workers to complete
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results
+	totalSessions := 0
+	for count := range resultsChan {
+		totalSessions += count
+	}
+
+	Log("Notebook sessions sync complete: %d total sessions synced\n", totalSessions)
+	return nil
+}
+
+// syncNotebookSessions fetches and saves Livy sessions for a single notebook
+func (a *App) syncNotebookSessions(workspaceID, notebookID string) int {
+	continuationToken := ""
+	totalSessions := 0
+
+	// Paginate through all Livy sessions for this notebook
+	for {
+		response, err := a.fabricClient.GetLivySessions(a.ctx, workspaceID, notebookID, continuationToken)
+		if err != nil {
+			Log("Warning: failed to get Livy sessions for notebook %s: %v\n", notebookID, err)
+			break // Skip this notebook
+		}
+
+		if response == nil || len(response.Value) == 0 {
+			break
+		}
+
+		// Convert fabric.LivySession to db.NotebookSession
+		dbSessions := make([]db.NotebookSession, 0, len(response.Value))
+		for _, livySession := range response.Value {
+			dbSession := db.NotebookSession{
+				LivyID:        livySession.LivyID,
+				JobInstanceID: livySession.JobInstanceID,
+				WorkspaceID:   workspaceID,
+				NotebookID:    notebookID,
+				State:         livySession.State, // Required non-pointer field
+			}
+
+			// Handle optional string fields
+			if livySession.SparkApplicationID != "" {
+				dbSession.SparkApplicationID = &livySession.SparkApplicationID
+			}
+			if livySession.Origin != "" {
+				dbSession.Origin = &livySession.Origin
+			}
+			if livySession.AttemptNumber != 0 {
+				dbSession.AttemptNumber = &livySession.AttemptNumber
+			}
+			if livySession.LivyName != "" {
+				dbSession.LivyName = &livySession.LivyName
+			}
+			if livySession.CancellationReason != "" {
+				dbSession.CancellationReason = &livySession.CancellationReason
+			}
+			if livySession.CapacityID != "" {
+				dbSession.CapacityID = &livySession.CapacityID
+			}
+			if livySession.OperationName != "" {
+				dbSession.OperationName = &livySession.OperationName
+			}
+			if livySession.RuntimeVersion != "" {
+				dbSession.RuntimeVersion = &livySession.RuntimeVersion
+			}
+			dbSession.IsHighConcurrency = &livySession.IsHighConcurrency
+
+			// Handle FabricTime fields
+			if !livySession.SubmittedDateTime.Time.IsZero() {
+				dbSession.SubmittedDateTime = &livySession.SubmittedDateTime.Time
+			}
+			if !livySession.StartDateTime.Time.IsZero() {
+				dbSession.StartDateTime = &livySession.StartDateTime.Time
+			}
+			if !livySession.EndDateTime.Time.IsZero() {
+				dbSession.EndDateTime = &livySession.EndDateTime.Time
+			}
+
+			// Extract submitter info
+			if livySession.Submitter.ID != "" {
+				dbSession.SubmitterID = &livySession.Submitter.ID
+			}
+			if livySession.Submitter.Type != "" {
+				dbSession.SubmitterType = &livySession.Submitter.Type
+			}
+
+			// Extract item info from top-level fields (not nested Item struct)
+			if livySession.ItemName != "" {
+				dbSession.ItemName = &livySession.ItemName
+			}
+			if livySession.ItemType != "" {
+				dbSession.ItemType = &livySession.ItemType
+			}
+			if livySession.JobType != "" {
+				dbSession.JobType = &livySession.JobType
+			}
+
+			// Convert durations to milliseconds
+			if livySession.QueuedDuration.Value > 0 {
+				ms := convertToMs(livySession.QueuedDuration.Value, livySession.QueuedDuration.TimeUnit)
+				dbSession.QueuedDurationMs = &ms
+			}
+			if livySession.RunningDuration.Value > 0 {
+				ms := convertToMs(livySession.RunningDuration.Value, livySession.RunningDuration.TimeUnit)
+				dbSession.RunningDurationMs = &ms
+			}
+			if livySession.TotalDuration.Value > 0 {
+				ms := convertToMs(livySession.TotalDuration.Value, livySession.TotalDuration.TimeUnit)
+				dbSession.TotalDurationMs = &ms
+			}
+
+			// Extract consumer identity ID
+			if livySession.ConsumerIdentity.ID != "" {
+				dbSession.ConsumerIdentityID = &livySession.ConsumerIdentity.ID
+			}
+
+			dbSessions = append(dbSessions, dbSession)
+		}
+
+		// Save sessions to database
+		if len(dbSessions) > 0 {
+			if err := a.db.SaveLivySessions(dbSessions); err != nil {
+				Log("Warning: failed to save Livy sessions for notebook %s: %v\n", notebookID, err)
+				break
+			}
+			totalSessions += len(dbSessions)
+		}
+
+		// Check if there are more pages
+		if response.ContinuationToken == "" {
+			break
+		}
+		continuationToken = response.ContinuationToken
+	}
+
+	if totalSessions > 0 {
+		Log("Synced %d sessions for notebook %s\n", totalSessions, notebookID)
+	}
+
+	return totalSessions
+}
+
+// convertToMs converts duration from Fabric API to milliseconds
+func convertToMs(value int, timeUnit string) int {
+	switch timeUnit {
+	case "Seconds":
+		return value * 1000
+	case "Minutes":
+		return value * 60000
+	case "Hours":
+		return value * 3600000
+	case "Milliseconds":
+		return value
+	default:
+		return value // Assume milliseconds if unknown
 	}
 }
 

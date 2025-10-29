@@ -4,6 +4,7 @@
     import { filterStore } from "../stores/filters.js";
     import Analytics from "./Analytics.svelte";
     import Logs from "./Logs.svelte";
+    import FabricLink from "./FabricLink.svelte";
 
     let workspaces = [];
     let jobs = [];
@@ -19,6 +20,10 @@
     let workspaceSearchText = "";
     let hasLoadedData = false;
     let lastSyncTime = "";
+
+    // Auth error state
+    let authError = null;
+    let showAuthErrorModal = false;
 
     // Expanded job state for hierarchical view
     let expandedJobs = new Set();
@@ -69,18 +74,58 @@
     async function loadData() {
         try {
             isLoading = true;
-            // Load fresh data from Fabric API (also persists to cache)
-            workspaces = (await window.go.main.App.GetWorkspaces()) || [];
-            jobs = (await window.go.main.App.GetJobs()) || [];
-            hasLoadedData = true;
+            authError = null; // Clear any previous errors
 
-            // Update last sync time
-            lastSyncTime = new Date().toISOString();
+            // Load fresh data from Fabric API (also persists to cache)
+            const freshWorkspaces =
+                (await window.go.main.App.GetWorkspaces()) || [];
+            const freshJobs = (await window.go.main.App.GetJobs()) || [];
+
+            // Check for authentication errors
+            const workspaceError = freshWorkspaces.find(
+                (w) => w.error === "authentication_required",
+            );
+            const jobError = freshJobs.find(
+                (j) => j.error === "authentication_required",
+            );
+
+            if (workspaceError || jobError) {
+                const error = workspaceError || jobError;
+                authError = error;
+                showAuthErrorModal = true;
+
+                // Filter out error markers and use cached data if available
+                workspaces = freshWorkspaces.filter((w) => !w._is_error_marker);
+                jobs = freshJobs.filter((j) => !j._is_error_marker);
+
+                console.log("Authentication expired, showing cached data");
+            } else {
+                // Success - use fresh data
+                workspaces = freshWorkspaces;
+                jobs = freshJobs;
+                hasLoadedData = true;
+
+                // Update last sync time
+                lastSyncTime = new Date().toISOString();
+            }
         } catch (error) {
             console.error("Failed to load data:", error);
         } finally {
             isLoading = false;
         }
+    }
+
+    function handleAuthError_SignOut() {
+        showAuthErrorModal = false;
+        authError = null;
+        handleLogout();
+    }
+
+    function handleAuthError_ContinueOffline() {
+        showAuthErrorModal = false;
+        authError = null;
+        // Keep the cached data that's already loaded
+        console.log("Continuing with cached data");
     }
 
     async function handleLogout() {
@@ -295,6 +340,38 @@
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={stopResize} />
 
+<!-- Auth Error Modal -->
+{#if showAuthErrorModal && authError}
+    <div
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+    >
+        <div
+            class="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 border border-slate-700"
+        >
+            <h2 class="text-xl font-bold text-white mb-4">Session Expired</h2>
+            <p class="text-slate-300 mb-6">
+                {authError.message}
+            </p>
+            <div class="flex gap-3">
+                <button
+                    on:click={handleAuthError_SignOut}
+                    class="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+                >
+                    Sign Out & Re-authenticate
+                </button>
+                {#if authError.cached_data_available}
+                    <button
+                        on:click={handleAuthError_ContinueOffline}
+                        class="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-md transition-colors"
+                    >
+                        Continue with Cached Data
+                    </button>
+                {/if}
+            </div>
+        </div>
+    </div>
+{/if}
+
 <div class="h-screen flex flex-col bg-slate-900">
     <!-- Header -->
     <header class="bg-slate-800 border-b border-slate-700 px-6 py-4">
@@ -343,13 +420,15 @@
                             ).toLocaleString()}
                         {/if}
                     </div>
-                    <button
-                        on:click={loadData}
-                        class="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
-                        disabled={isLoading}
-                    >
-                        {isLoading ? "Loading..." : "Refresh from API"}
-                    </button>
+                    {#if !$authStore.offlineMode}
+                        <button
+                            on:click={loadData}
+                            class="px-4 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors"
+                            disabled={isLoading}
+                        >
+                            {isLoading ? "Loading..." : "Refresh from API"}
+                        </button>
+                    {/if}
                 {/if}
                 <button
                     on:click={handleLogout}
@@ -360,6 +439,41 @@
             </div>
         </div>
     </header>
+
+    <!-- Offline Mode Banner -->
+    {#if $authStore.offlineMode}
+        <div class="bg-yellow-900/50 border-b border-yellow-700 px-6 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <svg
+                        class="h-5 w-5 text-yellow-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                        />
+                    </svg>
+                    <span class="text-yellow-200 text-sm font-medium">
+                        Viewing cached data only. Sign in to refresh from API.
+                    </span>
+                </div>
+                <button
+                    on:click={async () => {
+                        await authActions.exitOfflineMode();
+                        // Redirect will happen via App.svelte watching authStore
+                    }}
+                    class="px-4 py-1.5 text-sm bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors"
+                >
+                    Sign In
+                </button>
+            </div>
+        </div>
+    {/if}
 
     <!-- Main Content -->
     <main class="flex-1 overflow-hidden">
@@ -608,7 +722,15 @@
                             <div
                                 class="bg-slate-800 rounded-lg overflow-hidden"
                             >
-                                <table class="w-full">
+                                <table class="w-full jobs-table">
+                                    <colgroup>
+                                        <col style="width: 4%;" />
+                                        <col style="width: 36%;" />
+                                        <col style="width: 16%;" />
+                                        <col style="width: 14%;" />
+                                        <col style="width: 16%;" />
+                                        <col style="width: 14%;" />
+                                    </colgroup>
                                     <thead class="bg-slate-700">
                                         <tr>
                                             <th
@@ -640,7 +762,9 @@
                                         {#each filteredJobs as job}
                                             <!-- Parent Job Row -->
                                             <tr class="hover:bg-slate-700/50">
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     {#if job.itemType === "DataPipeline"}
                                                         <button
                                                             on:click={() =>
@@ -703,11 +827,15 @@
                                                         </button>
                                                     {/if}
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 jobs-table__job-cell"
+                                                >
                                                     <div
-                                                        class="text-sm text-white font-medium flex items-center gap-2"
+                                                        class="text-sm text-white font-medium flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                     >
-                                                        <span>
+                                                        <span
+                                                            class="truncate jobs-table__job-title"
+                                                        >
                                                             {job.itemDisplayName ||
                                                                 job.itemId}
                                                         </span>
@@ -728,15 +856,20 @@
                                                                 </span>
                                                             {/if}
                                                         {/if}
+                                                        <FabricLink
+                                                            url={job.fabricUrl}
+                                                        />
                                                     </div>
                                                     <div
-                                                        class="text-xs text-slate-400"
+                                                        class="text-xs text-slate-400 truncate"
                                                     >
                                                         {job.workspaceName ||
                                                             job.workspaceId}
                                                     </div>
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     <div
                                                         class="text-sm text-slate-300"
                                                     >
@@ -748,7 +881,9 @@
                                                         {job.jobType}
                                                     </div>
                                                 </td>
-                                                <td class="px-4 py-3">
+                                                <td
+                                                    class="px-4 py-3 whitespace-nowrap"
+                                                >
                                                     <span
                                                         class="inline-flex px-2 py-1 text-xs font-semibold rounded-full {getStatusColor(
                                                             job.status,
@@ -759,12 +894,12 @@
                                                     </span>
                                                 </td>
                                                 <td
-                                                    class="px-4 py-3 text-sm text-slate-300"
+                                                    class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap"
                                                 >
                                                     {formatDate(job.startTime)}
                                                 </td>
                                                 <td
-                                                    class="px-4 py-3 text-sm text-slate-300"
+                                                    class="px-4 py-3 text-sm text-slate-300 whitespace-nowrap"
                                                 >
                                                     {formatDuration(
                                                         job.durationMs,
@@ -779,7 +914,7 @@
                                                         class="bg-slate-800/50 hover:bg-slate-700/30"
                                                     >
                                                         <td
-                                                            class="px-4 py-2 text-right"
+                                                            class="px-4 py-2 text-right whitespace-nowrap"
                                                         >
                                                             {#if child.childJobInstanceId && child.activityType === "ExecutePipeline"}
                                                                 <button
@@ -833,24 +968,29 @@
                                                             {/if}
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 pl-8"
+                                                            class="px-4 py-2 pl-8 jobs-table__job-cell"
                                                         >
                                                             <div
-                                                                class="text-sm text-slate-300 flex items-center gap-2"
+                                                                class="text-sm text-slate-300 flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                             >
                                                                 <span
-                                                                    class="text-base"
+                                                                    class="text-base flex-shrink-0"
                                                                     >{getActivityIcon(
                                                                         child.activityType,
                                                                     )}</span
                                                                 >
-                                                                <span>
+                                                                <span
+                                                                    class="truncate jobs-table__job-title"
+                                                                >
                                                                     {child.activityName}
                                                                 </span>
+                                                                <FabricLink
+                                                                    url={child.fabricUrl}
+                                                                />
                                                             </div>
                                                             {#if child.childPipelineName || child.childNotebookName}
                                                                 <div
-                                                                    class="text-xs text-slate-400 ml-7"
+                                                                    class="text-xs text-slate-400 ml-7 truncate"
                                                                 >
                                                                     {child.childPipelineName ||
                                                                         child.childNotebookName}
@@ -864,7 +1004,9 @@
                                                                 </div>
                                                             {/if}
                                                         </td>
-                                                        <td class="px-4 py-2">
+                                                        <td
+                                                            class="px-4 py-2 whitespace-nowrap"
+                                                        >
                                                             <div
                                                                 class="text-xs text-slate-400"
                                                             >
@@ -873,7 +1015,9 @@
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td class="px-4 py-2">
+                                                        <td
+                                                            class="px-4 py-2 whitespace-nowrap"
+                                                        >
                                                             <span
                                                                 class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full {getStatusColor(
                                                                     child.status,
@@ -883,14 +1027,14 @@
                                                             </span>
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 text-xs text-slate-400"
+                                                            class="px-4 py-2 text-xs text-slate-400 whitespace-nowrap"
                                                         >
                                                             {formatDate(
                                                                 child.activityRunStart,
                                                             )}
                                                         </td>
                                                         <td
-                                                            class="px-4 py-2 text-xs text-slate-400"
+                                                            class="px-4 py-2 text-xs text-slate-400 whitespace-nowrap"
                                                         >
                                                             {formatDuration(
                                                                 child.durationMs,
@@ -905,7 +1049,7 @@
                                                                 class="bg-slate-800/30 hover:bg-slate-700/20"
                                                             >
                                                                 <td
-                                                                    class="px-4 py-2 text-right"
+                                                                    class="px-4 py-2 text-right whitespace-nowrap"
                                                                 >
                                                                     <span
                                                                         class="text-slate-600 text-xs"
@@ -913,24 +1057,29 @@
                                                                     >
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 pl-16"
+                                                                    class="px-4 py-2 pl-16 jobs-table__job-cell"
                                                                 >
                                                                     <div
-                                                                        class="text-sm text-slate-400 flex items-center gap-2"
+                                                                        class="text-sm text-slate-400 flex items-center gap-2 min-w-0 jobs-table__job-name"
                                                                     >
                                                                         <span
-                                                                            class="text-base"
+                                                                            class="text-base flex-shrink-0"
                                                                             >{getActivityIcon(
                                                                                 grandchild.activityType,
                                                                             )}</span
                                                                         >
-                                                                        <span>
+                                                                        <span
+                                                                            class="truncate jobs-table__job-title"
+                                                                        >
                                                                             {grandchild.activityName}
                                                                         </span>
+                                                                        <FabricLink
+                                                                            url={grandchild.fabricUrl}
+                                                                        />
                                                                     </div>
                                                                     {#if grandchild.childPipelineName || grandchild.childNotebookName}
                                                                         <div
-                                                                            class="text-xs text-slate-500 ml-7"
+                                                                            class="text-xs text-slate-500 ml-7 truncate"
                                                                         >
                                                                             {grandchild.childPipelineName ||
                                                                                 grandchild.childNotebookName}
@@ -938,7 +1087,7 @@
                                                                     {/if}
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2"
+                                                                    class="px-4 py-2 whitespace-nowrap"
                                                                 >
                                                                     <div
                                                                         class="text-xs text-slate-500"
@@ -949,7 +1098,7 @@
                                                                     </div>
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2"
+                                                                    class="px-4 py-2 whitespace-nowrap"
                                                                 >
                                                                     <span
                                                                         class="inline-flex px-2 py-0.5 text-xs rounded-full {getStatusColor(
@@ -960,14 +1109,14 @@
                                                                     </span>
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 text-xs text-slate-500"
+                                                                    class="px-4 py-2 text-xs text-slate-500 whitespace-nowrap"
                                                                 >
                                                                     {formatDate(
                                                                         grandchild.activityRunStart,
                                                                     )}
                                                                 </td>
                                                                 <td
-                                                                    class="px-4 py-2 text-xs text-slate-500"
+                                                                    class="px-4 py-2 text-xs text-slate-500 whitespace-nowrap"
                                                                 >
                                                                     {formatDuration(
                                                                         grandchild.durationMs,

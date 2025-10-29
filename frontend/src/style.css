@@ -25,6 +25,25 @@ body {
     flex-direction: column;
 }
 
+.jobs-table {
+    table-layout: fixed;
+}
+
+.jobs-table__job-cell {
+    white-space: normal;
+}
+
+.jobs-table__job-name {
+    min-width: 0;
+}
+
+.jobs-table__job-title {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
     width: 8px;

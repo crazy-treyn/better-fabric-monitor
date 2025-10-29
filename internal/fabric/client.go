@@ -424,6 +424,66 @@ type ActivityError struct {
 	Details     json.RawMessage `json:"details"` // Can be string or array depending on error type
 }
 
+// LivySession represents a Spark Livy session for a notebook run
+type LivySession struct {
+	LivyID             string `json:"livyId"`
+	JobInstanceID      string `json:"jobInstanceId"`
+	SparkApplicationID string `json:"sparkApplicationId"`
+	State              string `json:"state"`
+	Origin             string `json:"origin"`
+	AttemptNumber      int    `json:"attemptNumber"`
+	MaxNumberAttempts  int    `json:"maxNumberOfAttempts"`
+	LivyName           string `json:"livyName"`
+	Submitter          struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	} `json:"submitter"`
+	Item struct {
+		WorkspaceID   string `json:"workspaceId"`
+		ItemID        string `json:"itemId"`
+		ReferenceType string `json:"referenceType"`
+	} `json:"item"`
+	ItemName          string     `json:"itemName"`
+	ItemType          string     `json:"itemType"`
+	JobType           string     `json:"jobType"`
+	SubmittedDateTime FabricTime `json:"submittedDateTime"`
+	StartDateTime     FabricTime `json:"startDateTime"`
+	EndDateTime       FabricTime `json:"endDateTime"`
+	QueuedDuration    struct {
+		Value    int    `json:"value"`
+		TimeUnit string `json:"timeUnit"`
+	} `json:"queuedDuration"`
+	RunningDuration struct {
+		Value    int    `json:"value"`
+		TimeUnit string `json:"timeUnit"`
+	} `json:"runningDuration"`
+	TotalDuration struct {
+		Value    int    `json:"value"`
+		TimeUnit string `json:"timeUnit"`
+	} `json:"totalDuration"`
+	CancellationReason string `json:"cancellationReason"`
+	CapacityID         string `json:"capacityId"`
+	OperationName      string `json:"operationName"`
+	ConsumerIdentity   struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	} `json:"consumerIdentity"`
+	RuntimeVersion    string `json:"runtimeVersion"`
+	IsHighConcurrency bool   `json:"isHighConcurrency"`
+	CreatorItem       struct {
+		WorkspaceID   string `json:"workspaceId"`
+		ItemID        string `json:"itemId"`
+		ReferenceType string `json:"referenceType"`
+	} `json:"creatorItem"`
+}
+
+// LivySessionsResponse represents the API response for Livy sessions
+type LivySessionsResponse struct {
+	Value             []LivySession `json:"value"`
+	ContinuationToken string        `json:"continuationToken"`
+	ContinuationURI   string        `json:"continuationUri"`
+}
+
 // GetRecentJobs retrieves recent job instances across all workspaces in Fabric with parallel processing
 // If startTimeFrom is provided, only fetches jobs with start_time > startTimeFrom
 // Always fetches jobs with end_time IS NULL (in progress) regardless of start time
@@ -633,4 +693,38 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 	}
 
 	return allJobs, allItems, nil
+}
+
+// GetLivySessions retrieves Livy sessions for a specific notebook with pagination support
+func (c *Client) GetLivySessions(ctx context.Context, workspaceID, notebookID string, continuationToken string) (*LivySessionsResponse, error) {
+	url := fmt.Sprintf("%s/workspaces/%s/notebooks/%s/livySessions", c.baseURL, workspaceID, notebookID)
+	if continuationToken != "" {
+		url += "?continuationToken=" + continuationToken
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequestWithRetry(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var response LivySessionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &response, nil
 }

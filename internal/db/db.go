@@ -69,6 +69,13 @@ func NewDatabase(path string, encryptionKey string) (*Database, error) {
 // Close closes the database connection
 func (db *Database) Close() error {
 	if db.conn != nil {
+		// Force a checkpoint to merge WAL into main database file
+		// This ensures all pending writes are flushed and the .wal file is cleaned up
+		_, err := db.conn.Exec("CHECKPOINT")
+		if err != nil {
+			// Log but don't fail - still try to close the connection
+			fmt.Printf("Warning: failed to checkpoint database before close: %v\n", err)
+		}
 		return db.conn.Close()
 	}
 	return nil
@@ -116,23 +123,40 @@ func (db *Database) initSchema() error {
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 
-	-- Pipeline runs table (if needed separately)
-	CREATE TABLE IF NOT EXISTS pipeline_runs (
-		run_id VARCHAR PRIMARY KEY,
-		workspace_id VARCHAR NOT NULL REFERENCES workspaces(id),
-		pipeline_id VARCHAR NOT NULL REFERENCES items(id),
-		pipeline_name VARCHAR NOT NULL,
-		status VARCHAR NOT NULL,
-		start_time TIMESTAMP NOT NULL,
-		end_time TIMESTAMP,
-		duration_ms BIGINT,
-		error_message VARCHAR,
+	-- Create sequence for sync_metadata id
+	CREATE SEQUENCE IF NOT EXISTS sync_metadata_id_seq START 1;
+
+	-- Notebook sessions table (Livy sessions)
+	CREATE TABLE IF NOT EXISTS notebook_sessions (
+		livy_id VARCHAR PRIMARY KEY,
+		job_instance_id VARCHAR NOT NULL,
+		workspace_id VARCHAR NOT NULL,
+		notebook_id VARCHAR NOT NULL,
+		spark_application_id VARCHAR,
+		state VARCHAR NOT NULL,
+		origin VARCHAR,
+		attempt_number INTEGER,
+		livy_name VARCHAR,
+		submitter_id VARCHAR,
+		submitter_type VARCHAR,
+		item_name VARCHAR,
+		item_type VARCHAR,
+		job_type VARCHAR,
+		submitted_datetime TIMESTAMP,
+		start_datetime TIMESTAMP,
+		end_datetime TIMESTAMP,
+		queued_duration_ms INTEGER,
+		running_duration_ms INTEGER,
+		total_duration_ms INTEGER,
+		cancellation_reason VARCHAR,
+		capacity_id VARCHAR,
+		operation_name VARCHAR,
+		consumer_identity_id VARCHAR,
+		runtime_version VARCHAR,
+		is_high_concurrency BOOLEAN,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
-
-	-- Create sequence for sync_metadata id
-	CREATE SEQUENCE IF NOT EXISTS sync_metadata_id_seq START 1;
 
 	-- Sync metadata
 	CREATE TABLE IF NOT EXISTS sync_metadata (
