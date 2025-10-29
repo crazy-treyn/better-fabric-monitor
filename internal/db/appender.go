@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 )
@@ -181,6 +182,9 @@ func appendJobInstances(driverConn driver.Conn, jobs []JobInstance) error {
 	}
 	defer appender.Close()
 
+	// Use current UTC timestamp for created_at and updated_at
+	currentTime := time.Now().UTC()
+
 	for _, job := range jobs {
 		// Dereference pointers for appender - use nil for NULL values
 		var endTime interface{} = nil
@@ -223,8 +227,8 @@ func appendJobInstances(driverConn driver.Conn, jobs []JobInstance) error {
 			invokerType,
 			rootActivityID,
 			activityRuns,
-			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
-			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			currentTime, // created_at - use explicit timestamp
+			currentTime, // updated_at - use explicit timestamp
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append job instance %s: %w", job.ID, err)
@@ -250,6 +254,9 @@ func appendNotebookSessions(driverConn driver.Conn, sessions []NotebookSession) 
 		return fmt.Errorf("failed to create appender for notebook_sessions: %w", err)
 	}
 	defer appender.Close()
+
+	// Use current UTC timestamp for created_at and updated_at
+	currentTime := time.Now().UTC()
 
 	for _, s := range sessions {
 		// Dereference all pointer fields for appender
@@ -365,8 +372,8 @@ func appendNotebookSessions(driverConn driver.Conn, sessions []NotebookSession) 
 			consumerIdentityID,
 			runtimeVersion,
 			isHighConcurrency,
-			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
-			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			currentTime, // created_at - use explicit timestamp
+			currentTime, // updated_at - use explicit timestamp
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append notebook session %s: %w", s.LivyID, err)
@@ -393,6 +400,9 @@ func appendWorkspaces(driverConn driver.Conn, workspaces []Workspace) error {
 	}
 	defer appender.Close()
 
+	// Use current UTC timestamp for created_at and updated_at
+	currentTime := time.Now().UTC()
+
 	for _, ws := range workspaces {
 		var description interface{} = nil
 		if ws.Description != nil {
@@ -404,8 +414,8 @@ func appendWorkspaces(driverConn driver.Conn, workspaces []Workspace) error {
 			ws.DisplayName,
 			ws.Type,
 			description,
-			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
-			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			currentTime, // created_at - use explicit timestamp
+			currentTime, // updated_at - use explicit timestamp
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append workspace %s: %w", ws.ID, err)
@@ -432,6 +442,9 @@ func appendItems(driverConn driver.Conn, items []Item) error {
 	}
 	defer appender.Close()
 
+	// Use current UTC timestamp for created_at and updated_at
+	currentTime := time.Now().UTC()
+
 	for _, item := range items {
 		var description interface{} = nil
 		if item.Description != nil {
@@ -444,8 +457,8 @@ func appendItems(driverConn driver.Conn, items []Item) error {
 			item.DisplayName,
 			item.Type,
 			description,
-			nil, // created_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
-			nil, // updated_at - let DuckDB use DEFAULT CURRENT_TIMESTAMP
+			currentTime, // created_at - use explicit timestamp
+			currentTime, // updated_at - use explicit timestamp
 		)
 		if err != nil {
 			return fmt.Errorf("failed to append item %s: %w", item.ID, err)

@@ -69,6 +69,13 @@ func NewDatabase(path string, encryptionKey string) (*Database, error) {
 // Close closes the database connection
 func (db *Database) Close() error {
 	if db.conn != nil {
+		// Force a checkpoint to merge WAL into main database file
+		// This ensures all pending writes are flushed and the .wal file is cleaned up
+		_, err := db.conn.Exec("CHECKPOINT")
+		if err != nil {
+			// Log but don't fail - still try to close the connection
+			fmt.Printf("Warning: failed to checkpoint database before close: %v\n", err)
+		}
 		return db.conn.Close()
 	}
 	return nil
@@ -112,21 +119,6 @@ func (db *Database) initSchema() error {
 		invoker_type VARCHAR,
 		root_activity_id VARCHAR,
 		activity_runs JSON,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	-- Pipeline runs table (if needed separately)
-	CREATE TABLE IF NOT EXISTS pipeline_runs (
-		run_id VARCHAR PRIMARY KEY,
-		workspace_id VARCHAR NOT NULL REFERENCES workspaces(id),
-		pipeline_id VARCHAR NOT NULL REFERENCES items(id),
-		pipeline_name VARCHAR NOT NULL,
-		status VARCHAR NOT NULL,
-		start_time TIMESTAMP NOT NULL,
-		end_time TIMESTAMP,
-		duration_ms BIGINT,
-		error_message VARCHAR,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
