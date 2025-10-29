@@ -133,8 +133,8 @@ Power users can query the local DuckDB database directly:
 # Install DuckDB CLI
 # Download from https://duckdb.org/docs/installation/
 
-# Open the database
-duckdb data\fabric-monitor.db
+# Open the database using DuckDB UI built into the DuckDB CLI
+duckdb -ui data\fabric-monitor.db
 
 # Example queries
 SELECT * FROM workspaces;
