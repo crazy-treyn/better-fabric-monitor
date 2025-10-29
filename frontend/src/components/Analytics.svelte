@@ -2,6 +2,7 @@
     import { onMount, afterUpdate } from "svelte";
     import { filterStore } from "../stores/filters.js";
     import Chart from "chart.js/auto";
+    import FabricLink from "./FabricLink.svelte";
 
     let analytics = null;
     let isLoading = true;
@@ -1075,11 +1076,15 @@
                             <div
                                 class="rounded-md bg-red-900/20 p-3 border border-red-800/30"
                             >
-                                <div
-                                    class="text-sm font-medium text-white truncate"
-                                    title={failure.itemDisplayName}
-                                >
-                                    {failure.itemDisplayName || failure.itemId}
+                                <div class="flex items-center justify-between">
+                                    <div
+                                        class="text-sm font-medium text-white truncate flex-1"
+                                        title={failure.itemDisplayName}
+                                    >
+                                        {failure.itemDisplayName ||
+                                            failure.itemId}
+                                    </div>
+                                    <FabricLink url={failure.fabricUrl} />
                                 </div>
                                 <div
                                     class="mt-1 text-xs text-slate-400 truncate"
@@ -1404,14 +1409,22 @@
                             {#each analytics.longRunningJobs as job}
                                 <tr class="hover:bg-slate-700/50">
                                     <td class="px-4 py-3">
-                                        <div
-                                            class="text-sm text-white truncate"
-                                            title={job.itemDisplayName}
-                                        >
-                                            {job.itemDisplayName || job.itemId}
-                                        </div>
-                                        <div class="text-xs text-slate-400">
-                                            {job.itemType || "N/A"}
+                                        <div class="flex items-center gap-2">
+                                            <div class="flex-1">
+                                                <div
+                                                    class="text-sm text-white truncate"
+                                                    title={job.itemDisplayName}
+                                                >
+                                                    {job.itemDisplayName ||
+                                                        job.itemId}
+                                                </div>
+                                                <div
+                                                    class="text-xs text-slate-400"
+                                                >
+                                                    {job.itemType || "N/A"}
+                                                </div>
+                                            </div>
+                                            <FabricLink url={job.fabricUrl} />
                                         </div>
                                     </td>
                                     <td

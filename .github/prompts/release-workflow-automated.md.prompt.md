@@ -21,6 +21,7 @@ This workflow automates the entire release process from version bump to GitHub R
 
 Ask the user for:
 1. **New version number** (format: X.Y.Z, e.g., 0.3.0, 1.0.0)
+2. **Confirmation that everything is merged into main in GitHub**: This workflow assumes that the code in `main` is going to be released.
 
 **Note:** You'll write the full release notes later in GitHub's draft editor, where you can:
 - Add formatted text with GitHub's markdown editor
