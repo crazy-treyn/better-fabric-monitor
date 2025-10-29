@@ -161,7 +161,7 @@ func (a *App) startup(ctx context.Context) {
 			},
 			App: config.AppConfig{
 				Name:     "Better Fabric Monitor",
-				Version:  "0.2.0",
+				Version:  "0.2.2",
 				LogLevel: "info",
 				Debug:    false,
 			},
@@ -1736,5 +1736,5 @@ func (a *App) GetAppVersion() string {
 	if a.config != nil && a.config.App.Version != "" {
 		return a.config.App.Version
 	}
-	return "0.2.0" // Fallback version
+	return "0.2.2" // Fallback version
 }
