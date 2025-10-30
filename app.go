@@ -471,12 +471,6 @@ func (a *App) GetJobs() []map[string]interface{} {
 		}
 	}
 
-	// If doing incremental sync, get cached jobs BEFORE persisting to database
-	var cachedJobs []map[string]interface{}
-	if startTimeFrom != nil && a.db != nil {
-		cachedJobs = a.GetJobsFromCache()
-	}
-
 	// Persist jobs to DuckDB
 	if a.db != nil && len(jobs) > 0 {
 		// First, persist any new items from the API (for full syncs or new items discovered)
@@ -598,7 +592,16 @@ func (a *App) GetJobs() []map[string]interface{} {
 		if len(jobs) > 0 {
 			a.enrichPipelineJobsWithActivityRuns()
 		}
+	}
 
+	// If doing incremental sync, get cached jobs AFTER enrichment to ensure fresh activity_runs data
+	var cachedJobs []map[string]interface{}
+	if startTimeFrom != nil && a.db != nil {
+		cachedJobs = a.GetJobsFromCache()
+	}
+
+	// Add Fabric deep link URLs to jobs
+	if a.db != nil {
 		// Now get livyIDs from database and add Fabric deep link URLs to jobs
 		jobIDs := make([]string, 0, len(jobs)+len(cachedJobs))
 		for _, job := range jobs {
