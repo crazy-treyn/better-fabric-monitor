@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"better-fabric-monitor/internal/logger"
+
 	_ "github.com/duckdb/duckdb-go/v2"
 )
 
@@ -74,7 +76,7 @@ func (db *Database) Close() error {
 		_, err := db.conn.Exec("CHECKPOINT")
 		if err != nil {
 			// Log but don't fail - still try to close the connection
-			fmt.Printf("Warning: failed to checkpoint database before close: %v\n", err)
+			logger.Log("Warning: failed to checkpoint database before close: %v\n", err)
 		}
 		return db.conn.Close()
 	}

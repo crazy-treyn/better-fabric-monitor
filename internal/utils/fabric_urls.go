@@ -1,6 +1,10 @@
 package utils
 
-import "fmt"
+import (
+	"fmt"
+
+	"better-fabric-monitor/internal/logger"
+)
 
 // GenerateFabricURL creates a deep link to Microsoft Fabric for a job run
 // Returns an empty string if the item type is not supported or required fields are missing
@@ -35,6 +39,7 @@ func GenerateFabricURL(workspaceID, itemID, itemType, jobRunID string, livyID *s
 		}
 		// Fall back to jobRunID (may not work, but better than no link)
 		// To get correct links, run SyncNotebookSessions() to populate livyID
+		logger.Log("Warning: Generating fallback notebook URL using jobRunID for notebook %s (job %s). Link may not work if capacity was paused during execution.\n", itemID, jobRunID)
 		return fmt.Sprintf(
 			"https://app.powerbi.com/workloads/de-ds/sparkmonitor/%s/%s?experience=fabric-developer",
 			itemID, jobRunID,

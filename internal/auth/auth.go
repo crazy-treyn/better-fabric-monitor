@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"better-fabric-monitor/internal/logger"
+
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
 )
 
@@ -78,7 +80,7 @@ func (a *AuthManager) StartDeviceCodeFlow(ctx context.Context) (*DeviceCodeInfo,
 	// Open browser to the verification URL
 	if err := openBrowser(deviceCode.Result.VerificationURL); err != nil {
 		// Don't fail if browser can't open, user can navigate manually
-		fmt.Printf("Warning: failed to open browser: %v\n", err)
+		logger.Log("Warning: failed to open browser: %v\n", err)
 	}
 
 	// Return the device code information to display in the UI

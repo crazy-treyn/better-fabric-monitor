@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"better-fabric-monitor/internal/logger"
 )
 
 // FabricTime is a custom time type that can parse Microsoft Fabric's timestamp format
@@ -649,7 +651,7 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 			// Collect item results
 			for itemResult := range itemResults {
 				if itemResult.Error != nil {
-					fmt.Printf("  [%s] Warning: %v\n", itemResult.Item.DisplayName, itemResult.Error)
+					logger.Log("  [%s] Warning: %v\n", itemResult.Item.DisplayName, itemResult.Error)
 					continue
 				}
 				result.Jobs = append(result.Jobs, itemResult.Jobs...)
