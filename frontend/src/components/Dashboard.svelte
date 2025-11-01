@@ -26,6 +26,9 @@
     let totalJobsCount = 0; // Total count of jobs in database
     let isLoadingMore = false; // Track if we're loading more jobs
     let scrollThrottleTimeout = null; // For throttling scroll events
+    
+    // Pagination constants
+    const INITIAL_JOBS_LIMIT = 250; // Number of jobs to load initially
 
     // Auth error state
     let authError = null;
@@ -45,6 +48,14 @@
     onMount(async () => {
         // Load cached data from DuckDB on mount
         await loadCachedData();
+        
+        // Cleanup function for component destruction
+        return () => {
+            if (scrollThrottleTimeout) {
+                clearTimeout(scrollThrottleTimeout);
+                scrollThrottleTimeout = null;
+            }
+        };
     });
 
     async function loadCachedData() {
@@ -62,7 +73,7 @@
 
             // Load only the latest 250 jobs initially
             const cachedJobs =
-                (await window.go.main.App.GetJobsFromCacheWithLimit(250)) || [];
+                (await window.go.main.App.GetJobsFromCacheWithLimit(INITIAL_JOBS_LIMIT)) || [];
             if (cachedJobs.length > 0) {
                 jobs = cachedJobs;
                 hasLoadedData = true;
@@ -106,29 +117,29 @@
     }
 
     function handleScroll(event) {
-        // Throttle scroll events to prevent performance issues
+        // Clear any existing timeout to prevent race conditions
         if (scrollThrottleTimeout) {
-            return;
+            clearTimeout(scrollThrottleTimeout);
         }
 
-        // Check if we should load more jobs
-        if (hasLoadedFullDataset || isLoadingMore || jobs.length >= totalJobsCount) {
-            return;
-        }
-
-        const target = event.target;
-        const scrollPosition = target.scrollTop + target.clientHeight;
-        const scrollHeight = target.scrollHeight;
-        
-        // Load all jobs when user scrolls to 80% of the content
-        if (scrollPosition / scrollHeight > 0.8) {
-            loadAllJobs();
-        }
-
-        // Set throttle timeout - prevent checking again for 200ms
+        // Throttle scroll events to prevent performance issues
         scrollThrottleTimeout = setTimeout(() => {
             scrollThrottleTimeout = null;
-        }, 200);
+
+            // Check if we should load more jobs
+            if (hasLoadedFullDataset || isLoadingMore || jobs.length >= totalJobsCount) {
+                return;
+            }
+
+            const target = event.target;
+            const scrollPosition = target.scrollTop + target.clientHeight;
+            const scrollHeight = target.scrollHeight;
+            
+            // Load all jobs when user scrolls to 80% of the content
+            if (scrollPosition / scrollHeight > 0.8) {
+                loadAllJobs();
+            }
+        }, 200); // Throttle to once every 200ms
     }
 
     async function loadData() {

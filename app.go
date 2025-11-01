@@ -858,7 +858,7 @@ func (a *App) GetJobsFromCacheWithLimit(limit int) []map[string]interface{} {
 
 	// Validate limit parameter
 	if limit <= 0 {
-		Log("Invalid limit parameter: %d, must be positive\n", limit)
+		Log("Invalid limit parameter: %d, must be a positive integer greater than 0\n", limit)
 		return []map[string]interface{}{}
 	}
 
