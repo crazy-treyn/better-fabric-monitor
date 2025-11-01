@@ -845,6 +845,96 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 	return result
 }
 
+// GetJobsFromCacheWithLimit retrieves a limited number of jobs from the local DuckDB cache
+func (a *App) GetJobsFromCacheWithLimit(limit int) []map[string]interface{} {
+	if a.db == nil {
+		return []map[string]interface{}{}
+	}
+
+	// Get limited jobs from database
+	filter := db.JobFilter{
+		Limit: &limit,
+	}
+	jobs, err := a.db.GetJobInstances(filter)
+	if err != nil {
+		Log("Failed to get jobs from cache: %v\n", err)
+		return []map[string]interface{}{}
+	}
+
+	// Convert to map format for frontend
+	result := make([]map[string]interface{}, 0, len(jobs))
+	for _, job := range jobs {
+		jobMap := map[string]interface{}{
+			"id":          job.ID,
+			"workspaceId": job.WorkspaceID,
+			"itemId":      job.ItemID,
+			"jobType":     job.JobType,
+			"status":      job.Status,
+			"startTime":   job.StartTime.Format(time.RFC3339),
+		}
+
+		// Add item display name and type from the joined data
+		if job.ItemDisplayName != nil {
+			jobMap["itemDisplayName"] = *job.ItemDisplayName
+		} else {
+			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
+		}
+
+		var itemType string
+		if job.ItemType != nil {
+			jobMap["itemType"] = *job.ItemType
+			itemType = *job.ItemType
+		} else {
+			jobMap["itemType"] = job.JobType // Fallback to job type
+			itemType = job.JobType
+		}
+
+		// Add workspace name from the joined data
+		if job.WorkspaceName != nil {
+			jobMap["workspaceName"] = *job.WorkspaceName
+		}
+
+		if job.EndTime != nil {
+			jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
+		}
+		if job.DurationMs != nil {
+			jobMap["durationMs"] = *job.DurationMs
+		}
+		if job.FailureReason != nil {
+			jobMap["failureReason"] = *job.FailureReason
+		}
+		if job.RootActivityID != nil {
+			jobMap["rootActivityId"] = *job.RootActivityID
+		}
+
+		// Generate Fabric deep link URL
+		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
+		if fabricURL != "" {
+			jobMap["fabricUrl"] = fabricURL
+		}
+
+		result = append(result, jobMap)
+	}
+
+	Log("Loaded %d jobs from cache (limit: %d)\n", len(result), limit)
+	return result
+}
+
+// GetJobsCount returns the total count of jobs in the cache
+func (a *App) GetJobsCount() int {
+	if a.db == nil {
+		return 0
+	}
+
+	count, err := a.db.GetJobInstancesCount()
+	if err != nil {
+		Log("Failed to get jobs count: %v\n", err)
+		return 0
+	}
+
+	return count
+}
+
 // GetWorkspacesFromCache retrieves workspaces from the local DuckDB cache
 func (a *App) GetWorkspacesFromCache() []map[string]interface{} {
 	if a.db == nil {

@@ -21,6 +21,11 @@
     let hasLoadedData = false;
     let lastSyncTime = "";
 
+    // Pagination state
+    let hasLoadedFullDataset = false; // Track if we've loaded all jobs
+    let totalJobsCount = 0; // Total count of jobs in database
+    let isLoadingMore = false; // Track if we're loading more jobs
+
     // Auth error state
     let authError = null;
     let showAuthErrorModal = false;
@@ -44,7 +49,7 @@
     async function loadCachedData() {
         try {
             isLoading = true;
-            // Load from local cache (DuckDB)
+            // Load from local cache (DuckDB) with limit of 250
             const cachedWorkspaces =
                 (await window.go.main.App.GetWorkspacesFromCache()) || [];
             if (cachedWorkspaces.length > 0) {
@@ -54,13 +59,19 @@
                 );
             }
 
+            // Load only the latest 250 jobs initially
             const cachedJobs =
-                (await window.go.main.App.GetJobsFromCache()) || [];
+                (await window.go.main.App.GetJobsFromCacheWithLimit(250)) || [];
             if (cachedJobs.length > 0) {
                 jobs = cachedJobs;
                 hasLoadedData = true;
-                console.log(`Loaded ${cachedJobs.length} jobs from cache`);
+                hasLoadedFullDataset = false; // We only loaded 250
+                console.log(`Loaded ${cachedJobs.length} jobs from cache (limited)`);
             }
+
+            // Get total job count
+            totalJobsCount = (await window.go.main.App.GetJobsCount()) || 0;
+            console.log(`Total jobs in database: ${totalJobsCount}`);
 
             // Get last sync time
             lastSyncTime = (await window.go.main.App.GetLastSyncTime()) || "";
@@ -68,6 +79,44 @@
             console.error("Failed to load cached data:", error);
         } finally {
             isLoading = false;
+        }
+    }
+
+    async function loadAllJobs() {
+        if (hasLoadedFullDataset || isLoadingMore) {
+            return; // Already loaded or currently loading
+        }
+
+        try {
+            isLoadingMore = true;
+            console.log("Loading all jobs from cache...");
+            
+            // Load all jobs from cache
+            const allJobs = (await window.go.main.App.GetJobsFromCache()) || [];
+            jobs = allJobs;
+            hasLoadedFullDataset = true;
+            
+            console.log(`Loaded all ${allJobs.length} jobs from cache`);
+        } catch (error) {
+            console.error("Failed to load all jobs:", error);
+        } finally {
+            isLoadingMore = false;
+        }
+    }
+
+    function handleScroll(event) {
+        // Check if we should load more jobs
+        if (hasLoadedFullDataset || isLoadingMore || jobs.length >= totalJobsCount) {
+            return;
+        }
+
+        const target = event.target;
+        const scrollPosition = target.scrollTop + target.clientHeight;
+        const scrollHeight = target.scrollHeight;
+        
+        // Load all jobs when user scrolls to 80% of the content
+        if (scrollPosition / scrollHeight > 0.8) {
+            loadAllJobs();
         }
     }
 
@@ -104,9 +153,13 @@
                 workspaces = freshWorkspaces;
                 jobs = freshJobs;
                 hasLoadedData = true;
+                hasLoadedFullDataset = true; // Fresh load gets all jobs
 
                 // Update last sync time
                 lastSyncTime = new Date().toISOString();
+                
+                // Update total count
+                totalJobsCount = (await window.go.main.App.GetJobsCount()) || 0;
             }
         } catch (error) {
             console.error("Failed to load data:", error);
@@ -623,7 +676,7 @@
                 ></div>
 
                 <!-- Main Panel -->
-                <div class="flex-1 p-6 overflow-auto">
+                <div class="flex-1 p-6 overflow-auto" on:scroll={handleScroll}>
                     <div class="mb-6">
                         <h2 class="text-2xl font-bold text-white mb-4">
                             Recent Jobs
@@ -1131,10 +1184,44 @@
                                     </tbody>
                                 </table>
                                 <div
-                                    class="px-4 py-3 bg-slate-700/50 text-sm text-slate-400"
+                                    class="px-4 py-3 bg-slate-700/50 text-sm text-slate-400 flex justify-between items-center"
                                 >
-                                    Showing {filteredJobs.length} of {jobs.length}
-                                    jobs
+                                    <span>
+                                        Showing {filteredJobs.length} of {jobs.length}
+                                        jobs
+                                        {#if !hasLoadedFullDataset && totalJobsCount > jobs.length}
+                                            (showing latest 250 of {totalJobsCount} total)
+                                        {/if}
+                                    </span>
+                                    {#if isLoadingMore}
+                                        <span class="flex items-center gap-2 text-primary-400">
+                                            <svg
+                                                class="animate-spin h-4 w-4"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <circle
+                                                    class="opacity-25"
+                                                    cx="12"
+                                                    cy="12"
+                                                    r="10"
+                                                    stroke="currentColor"
+                                                    stroke-width="4"
+                                                ></circle>
+                                                <path
+                                                    class="opacity-75"
+                                                    fill="currentColor"
+                                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                                ></path>
+                                            </svg>
+                                            Loading more jobs...
+                                        </span>
+                                    {:else if !hasLoadedFullDataset && totalJobsCount > jobs.length}
+                                        <span class="text-slate-500">
+                                            Scroll down to load all {totalJobsCount} jobs
+                                        </span>
+                                    {/if}
                                 </div>
                             </div>
                         {:else}

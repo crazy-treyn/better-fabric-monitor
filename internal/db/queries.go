@@ -224,6 +224,17 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	return jobs, rows.Err()
 }
 
+// GetJobInstancesCount retrieves the total count of job instances
+func (db *Database) GetJobInstancesCount() (int, error) {
+	query := `SELECT COUNT(*) FROM job_instances`
+	var count int
+	err := db.conn.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // UpdateJobInstanceActivityRuns updates the activity runs for a job instance
 func (db *Database) UpdateJobInstanceActivityRuns(jobID string, activityRuns []ActivityRun) error {
 	activityRunsJSON, err := json.Marshal(activityRuns)
