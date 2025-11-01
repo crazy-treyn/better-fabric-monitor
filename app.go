@@ -772,6 +772,60 @@ func (a *App) GetJobs() []map[string]interface{} {
 	return jobs
 }
 
+// convertJobToMap converts a JobInstance from database format to map format for frontend
+func convertJobToMap(job db.JobInstance) map[string]interface{} {
+	jobMap := map[string]interface{}{
+		"id":          job.ID,
+		"workspaceId": job.WorkspaceID,
+		"itemId":      job.ItemID,
+		"jobType":     job.JobType,
+		"status":      job.Status,
+		"startTime":   job.StartTime.Format(time.RFC3339),
+	}
+
+	// Add item display name and type from the joined data
+	if job.ItemDisplayName != nil {
+		jobMap["itemDisplayName"] = *job.ItemDisplayName
+	} else {
+		jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
+	}
+
+	var itemType string
+	if job.ItemType != nil {
+		jobMap["itemType"] = *job.ItemType
+		itemType = *job.ItemType
+	} else {
+		jobMap["itemType"] = job.JobType // Fallback to job type
+		itemType = job.JobType
+	}
+
+	// Add workspace name from the joined data
+	if job.WorkspaceName != nil {
+		jobMap["workspaceName"] = *job.WorkspaceName
+	}
+
+	if job.EndTime != nil {
+		jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
+	}
+	if job.DurationMs != nil {
+		jobMap["durationMs"] = *job.DurationMs
+	}
+	if job.FailureReason != nil {
+		jobMap["failureReason"] = *job.FailureReason
+	}
+	if job.RootActivityID != nil {
+		jobMap["rootActivityId"] = *job.RootActivityID
+	}
+
+	// Generate Fabric deep link URL
+	fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
+	if fabricURL != "" {
+		jobMap["fabricUrl"] = fabricURL
+	}
+
+	return jobMap
+}
+
 // GetJobsFromCache retrieves jobs from the local DuckDB cache
 func (a *App) GetJobsFromCache() []map[string]interface{} {
 	if a.db == nil {
@@ -789,56 +843,7 @@ func (a *App) GetJobsFromCache() []map[string]interface{} {
 	// Convert to map format for frontend
 	result := make([]map[string]interface{}, 0, len(jobs))
 	for _, job := range jobs {
-		jobMap := map[string]interface{}{
-			"id":          job.ID,
-			"workspaceId": job.WorkspaceID,
-			"itemId":      job.ItemID,
-			"jobType":     job.JobType,
-			"status":      job.Status,
-			"startTime":   job.StartTime.Format(time.RFC3339),
-		}
-
-		// Add item display name and type from the joined data
-		if job.ItemDisplayName != nil {
-			jobMap["itemDisplayName"] = *job.ItemDisplayName
-		} else {
-			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
-		}
-
-		var itemType string
-		if job.ItemType != nil {
-			jobMap["itemType"] = *job.ItemType
-			itemType = *job.ItemType
-		} else {
-			jobMap["itemType"] = job.JobType // Fallback to job type
-			itemType = job.JobType
-		}
-
-		// Add workspace name from the joined data
-		if job.WorkspaceName != nil {
-			jobMap["workspaceName"] = *job.WorkspaceName
-		}
-
-		if job.EndTime != nil {
-			jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
-		}
-		if job.DurationMs != nil {
-			jobMap["durationMs"] = *job.DurationMs
-		}
-		if job.FailureReason != nil {
-			jobMap["failureReason"] = *job.FailureReason
-		}
-		if job.RootActivityID != nil {
-			jobMap["rootActivityId"] = *job.RootActivityID
-		}
-
-		// Generate Fabric deep link URL
-		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
-		if fabricURL != "" {
-			jobMap["fabricUrl"] = fabricURL
-		}
-
-		result = append(result, jobMap)
+		result = append(result, convertJobToMap(job))
 	}
 
 	Log("Loaded %d jobs from cache\n", len(result))
@@ -870,56 +875,7 @@ func (a *App) GetJobsFromCacheWithLimit(limit int) []map[string]interface{} {
 	// Convert to map format for frontend
 	result := make([]map[string]interface{}, 0, len(jobs))
 	for _, job := range jobs {
-		jobMap := map[string]interface{}{
-			"id":          job.ID,
-			"workspaceId": job.WorkspaceID,
-			"itemId":      job.ItemID,
-			"jobType":     job.JobType,
-			"status":      job.Status,
-			"startTime":   job.StartTime.Format(time.RFC3339),
-		}
-
-		// Add item display name and type from the joined data
-		if job.ItemDisplayName != nil {
-			jobMap["itemDisplayName"] = *job.ItemDisplayName
-		} else {
-			jobMap["itemDisplayName"] = job.ItemID // Fallback to ID if name not available
-		}
-
-		var itemType string
-		if job.ItemType != nil {
-			jobMap["itemType"] = *job.ItemType
-			itemType = *job.ItemType
-		} else {
-			jobMap["itemType"] = job.JobType // Fallback to job type
-			itemType = job.JobType
-		}
-
-		// Add workspace name from the joined data
-		if job.WorkspaceName != nil {
-			jobMap["workspaceName"] = *job.WorkspaceName
-		}
-
-		if job.EndTime != nil {
-			jobMap["endTime"] = job.EndTime.Format(time.RFC3339)
-		}
-		if job.DurationMs != nil {
-			jobMap["durationMs"] = *job.DurationMs
-		}
-		if job.FailureReason != nil {
-			jobMap["failureReason"] = *job.FailureReason
-		}
-		if job.RootActivityID != nil {
-			jobMap["rootActivityId"] = *job.RootActivityID
-		}
-
-		// Generate Fabric deep link URL
-		fabricURL := utils.GenerateFabricURL(job.WorkspaceID, job.ItemID, itemType, job.ID, job.LivyID)
-		if fabricURL != "" {
-			jobMap["fabricUrl"] = fabricURL
-		}
-
-		result = append(result, jobMap)
+		result = append(result, convertJobToMap(job))
 	}
 
 	Log("Loaded %d jobs from cache (limit: %d)\n", len(result), limit)

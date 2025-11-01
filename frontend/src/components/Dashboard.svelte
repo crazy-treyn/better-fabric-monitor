@@ -111,10 +111,6 @@
             return;
         }
 
-        scrollThrottleTimeout = setTimeout(() => {
-            scrollThrottleTimeout = null;
-        }, 200); // Throttle to once every 200ms
-
         // Check if we should load more jobs
         if (hasLoadedFullDataset || isLoadingMore || jobs.length >= totalJobsCount) {
             return;
@@ -128,6 +124,11 @@
         if (scrollPosition / scrollHeight > 0.8) {
             loadAllJobs();
         }
+
+        // Set throttle timeout - prevent checking again for 200ms
+        scrollThrottleTimeout = setTimeout(() => {
+            scrollThrottleTimeout = null;
+        }, 200);
     }
 
     async function loadData() {
