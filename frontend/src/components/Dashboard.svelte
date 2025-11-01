@@ -25,6 +25,7 @@
     let hasLoadedFullDataset = false; // Track if we've loaded all jobs
     let totalJobsCount = 0; // Total count of jobs in database
     let isLoadingMore = false; // Track if we're loading more jobs
+    let scrollThrottleTimeout = null; // For throttling scroll events
 
     // Auth error state
     let authError = null;
@@ -105,6 +106,15 @@
     }
 
     function handleScroll(event) {
+        // Throttle scroll events to prevent performance issues
+        if (scrollThrottleTimeout) {
+            return;
+        }
+
+        scrollThrottleTimeout = setTimeout(() => {
+            scrollThrottleTimeout = null;
+        }, 200); // Throttle to once every 200ms
+
         // Check if we should load more jobs
         if (hasLoadedFullDataset || isLoadingMore || jobs.length >= totalJobsCount) {
             return;

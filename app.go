@@ -851,6 +851,12 @@ func (a *App) GetJobsFromCacheWithLimit(limit int) []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 
+	// Validate limit parameter
+	if limit <= 0 {
+		Log("Invalid limit parameter: %d, must be positive\n", limit)
+		return []map[string]interface{}{}
+	}
+
 	// Get limited jobs from database
 	filter := db.JobFilter{
 		Limit: &limit,
@@ -928,7 +934,7 @@ func (a *App) GetJobsCount() int {
 
 	count, err := a.db.GetJobInstancesCount()
 	if err != nil {
-		Log("Failed to get jobs count: %v\n", err)
+		Log("Failed to retrieve job count from database: %v\n", err)
 		return 0
 	}
 

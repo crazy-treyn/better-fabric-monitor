@@ -224,7 +224,9 @@ func (db *Database) GetJobInstances(filter JobFilter) ([]JobInstance, error) {
 	return jobs, rows.Err()
 }
 
-// GetJobInstancesCount retrieves the total count of job instances
+// GetJobInstancesCount retrieves the total count of job instances in the database
+// Returns the count and any error encountered during the query
+// This is useful for pagination to show users how many total jobs exist
 func (db *Database) GetJobInstancesCount() (int, error) {
 	query := `SELECT COUNT(*) FROM job_instances`
 	var count int
