@@ -573,7 +573,7 @@
                         </div>
                     </div>
 
-                    <div class="space-y-2 overflow-y-auto flex-1 px-4 pb-4">
+                    <div class="space-y-2 overflow-y-auto flex-1 px-4 pt-4 pb-4">
                         {#each filteredWorkspaces as workspace}
                             <div
                                 class="p-3 bg-slate-700 rounded-lg hover:bg-slate-600 transition-colors {selectedWorkspaceIds.has(
