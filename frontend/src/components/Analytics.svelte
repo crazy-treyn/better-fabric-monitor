@@ -540,16 +540,24 @@
     }
 
     // Computed filtered workspaces for dropdown
-    $: filteredWorkspacesForDropdown = allWorkspaces.filter((ws) =>
-        (ws.displayName || ws.id)
-            .toLowerCase()
-            .includes(workspaceSearchText.toLowerCase()),
-    );
+    $: filteredWorkspacesForDropdown = allWorkspaces
+        .filter((ws) =>
+            (ws.displayName || ws.id)
+                .toLowerCase()
+                .includes(workspaceSearchText.toLowerCase()),
+        )
+        .sort((a, b) =>
+            (a.displayName || a.id)
+                .toLowerCase()
+                .localeCompare((b.displayName || b.id).toLowerCase()),
+        );
 
     // Computed filtered item types for dropdown
-    $: filteredItemTypesForDropdown = availableItemTypes.filter((type) =>
-        type.toLowerCase().includes(itemTypeSearchText.toLowerCase()),
-    );
+    $: filteredItemTypesForDropdown = availableItemTypes
+        .filter((type) =>
+            type.toLowerCase().includes(itemTypeSearchText.toLowerCase()),
+        )
+        .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
     // Count active filters
     $: activeFilterCount =

@@ -228,11 +228,17 @@
     });
 
     // Computed filtered workspaces based on search text
-    $: filteredWorkspaces = workspaces.filter((ws) =>
-        (ws.displayName || ws.id)
-            .toLowerCase()
-            .includes(workspaceSearchText.toLowerCase()),
-    );
+    $: filteredWorkspaces = workspaces
+        .filter((ws) =>
+            (ws.displayName || ws.id)
+                .toLowerCase()
+                .includes(workspaceSearchText.toLowerCase()),
+        )
+        .sort((a, b) =>
+            (a.displayName || a.id)
+                .toLowerCase()
+                .localeCompare((b.displayName || b.id).toLowerCase()),
+        );
 
     // Get unique values for filters
     $: uniqueTypes = [
