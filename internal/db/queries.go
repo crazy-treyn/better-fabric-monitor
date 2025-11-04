@@ -308,47 +308,38 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 	query := `
 		WITH child_activities AS (
 			SELECT 
-				json_extract_string(activity, '$.activityRunId') as activity_run_id,
-				json_extract_string(activity, '$.activityName') as activity_name,
-				json_extract_string(activity, '$.activityType') as activity_type,
-				json_extract_string(activity, '$.status') as status,
-				json_extract_string(activity, '$.activityRunStart') as start_time,
-				json_extract_string(activity, '$.activityRunEnd') as end_time,
-				CAST(json_extract(activity, '$.durationInMs') AS BIGINT) as duration_ms,
-				json_extract_string(activity, '$.error.message') as error_message,
-				json_extract_string(activity, '$.pipelineId') as pipeline_id,
-				-- Extract child job instance ID from output
+				j.id,
+				j.workspace_id as parent_workspace_id,
+				unnest(
+					list_filter(
+						CASE 
+							WHEN j.activity_runs IS NOT NULL 
+							THEN CAST(j.activity_runs AS JSON[])
+							ELSE []::JSON[]
+						END,
+						x -> json_extract_string(x, '$.activityType') IN ('ExecutePipeline', 'TridentNotebook')
+					),
+					recursive := true
+				) as activity,
 				COALESCE(
 					json_extract_string(activity, '$.output.pipelineRunId'),
 					json_extract_string(activity, '$.output.runId')
-				) as child_job_instance_id,
-				-- Extract child pipeline name from output
-				json_extract_string(activity, '$.output.properties.pipelineName') as child_pipeline_name,
-				-- Parent job's workspace
-				j.workspace_id as parent_workspace_id
+				) as child_job_instance_id
 			FROM job_instances j
-			CROSS JOIN unnest(
-				CASE 
-					WHEN j.activity_runs IS NOT NULL 
-					THEN CAST(j.activity_runs AS JSON[])
-					ELSE []::JSON[]
-				END
-			) as t(activity)
 			WHERE j.id = ?
-				AND json_extract_string(activity, '$.activityType') IN ('ExecutePipeline', 'TridentNotebook')
 		)
 		SELECT 
-			ca.activity_run_id,
-			ca.activity_name,
-			ca.activity_type,
-			ca.status,
-			ca.start_time,
-			ca.end_time,
-			ca.duration_ms,
-			ca.error_message,
-			ca.pipeline_id,
+			json_extract_string(ca.activity, '$.activityRunId') as activity_run_id,
+			json_extract_string(ca.activity, '$.activityName') as activity_name,
+			json_extract_string(ca.activity, '$.activityType') as activity_type,
+			json_extract_string(ca.activity, '$.status') as status,
+			json_extract_string(ca.activity, '$.activityRunStart') as start_time,
+			json_extract_string(ca.activity, '$.activityRunEnd') as end_time,
+			CAST(json_extract(ca.activity, '$.durationInMs') AS BIGINT) as duration_ms,
+			json_extract_string(ca.activity, '$.error.message') as error_message,
+			json_extract_string(ca.activity, '$.pipelineId') as pipeline_id,
 			ca.child_job_instance_id,
-			ca.child_pipeline_name,
+			json_extract_string(ca.activity, '$.output.properties.pipelineName') as child_pipeline_name,
 			ca.parent_workspace_id,
 			-- Join with job_instances to get child job details if exists
 			child_job.item_id as child_item_id,
@@ -359,7 +350,7 @@ func (db *Database) GetChildExecutions(jobID string) ([]ChildExecution, error) {
 		LEFT JOIN job_instances child_job ON child_job.id = ca.child_job_instance_id
 		LEFT JOIN items child_item ON child_job.item_id = child_item.id
 		LEFT JOIN notebook_sessions ns ON child_job.id = ns.job_instance_id
-		ORDER BY ca.start_time ASC
+		ORDER BY json_extract_string(ca.activity, '$.activityRunStart') ASC
 	`
 
 	rows, err := db.conn.Query(query, jobID)
