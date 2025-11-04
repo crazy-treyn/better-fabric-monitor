@@ -50,7 +50,6 @@ Every chart is clickable - drill down from high-level metrics to item-specific d
 - View detailed statistics including execution counts, success rates, and average durations
 
 ### ⚡ Fast & Efficient
-- **Lightning-fast sync** - Typical data refresh completes in seconds
 - **Smart incremental updates** - Only fetches new data since your last sync
 - **Local database** - Uses DuckDB for instant queries and offline access
 - **Optimized API usage** - Intelligent parallel processing and rate limiting respects Fabric API limits

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"better-fabric-monitor/internal/logger"
+
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 )
 
@@ -56,7 +58,7 @@ func (tc *TokenCache) Export(ctx context.Context, m cache.Marshaler, hints cache
 
 	// Persist to disk
 	if err := os.WriteFile(tc.filePath, data, 0600); err != nil {
-		fmt.Printf("Warning: failed to persist cache: %v\n", err)
+		logger.Log("Warning: failed to persist cache: %v\n", err)
 	}
 
 	return nil
