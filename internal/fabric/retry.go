@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"better-fabric-monitor/internal/logger"
 )
 
 const (
@@ -95,7 +97,10 @@ func (rp *RetryPolicy) GetBackoffDuration(attempt int, resp *http.Response) time
 }
 
 // ExecuteWithRetry executes a function with retry logic
-func (rp *RetryPolicy) ExecuteWithRetry(fn func() (*http.Response, error), onThrottle func()) (*http.Response, error) {
+// endpoint: API endpoint path (e.g., "/workspaces/xyz/items")
+// workspaceName: Optional workspace display name (use "N/A" if not applicable)
+// itemName: Optional item display name (use "N/A" if not applicable)
+func (rp *RetryPolicy) ExecuteWithRetry(fn func() (*http.Response, error), onThrottle func(), endpoint, workspaceName, itemName string) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 
@@ -121,9 +126,10 @@ func (rp *RetryPolicy) ExecuteWithRetry(fn func() (*http.Response, error), onThr
 			// Calculate backoff
 			backoff := rp.GetBackoffDuration(attempt, resp)
 
-			// Log retry attempt
-			fmt.Printf("Retry attempt %d/%d after %v (status: %d)\n",
-				attempt+1, rp.MaxRetries, backoff, resp.StatusCode)
+			// Log retry attempt with context
+			logger.Log("[RETRY %d/%d] %d → %v | %s | ws:%s | item:%s\n",
+				attempt+1, rp.MaxRetries, resp.StatusCode, backoff,
+				endpoint, workspaceName, itemName)
 
 			// Close the response body before retrying
 			if resp.Body != nil {
@@ -138,8 +144,9 @@ func (rp *RetryPolicy) ExecuteWithRetry(fn func() (*http.Response, error), onThr
 			// Network error or other error
 			if attempt < rp.MaxRetries {
 				backoff := rp.GetBackoffDuration(attempt, nil)
-				fmt.Printf("Retry attempt %d/%d after %v (error: %v)\n",
-					attempt+1, rp.MaxRetries, backoff, err)
+				logger.Log("[RETRY %d/%d] error → %v | %s | ws:%s | item:%s | err:%v\n",
+					attempt+1, rp.MaxRetries, backoff,
+					endpoint, workspaceName, itemName, err)
 				time.Sleep(backoff)
 			}
 		}

@@ -109,7 +109,7 @@ func detectLogLevel(message string) string {
 	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") {
 		return "ERROR"
 	}
-	if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") {
+	if strings.Contains(lower, "warning") || strings.Contains(lower, "warn") || strings.HasPrefix(message, "[RETRY") {
 		return "WARNING"
 	}
 	if strings.Contains(lower, "debug:") {

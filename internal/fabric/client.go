@@ -92,7 +92,10 @@ func NewClient(accessToken string) *Client {
 }
 
 // doRequestWithRetry performs an HTTP request with rate limiting and retry logic
-func (c *Client) doRequestWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+// endpoint: API endpoint path for logging (e.g., "/workspaces/xyz/items")
+// workspaceName: Workspace display name for context (use "N/A" if not applicable)
+// itemName: Item display name for context (use "N/A" if not applicable)
+func (c *Client) doRequestWithRetry(ctx context.Context, req *http.Request, endpoint, workspaceName, itemName string) (*http.Response, error) {
 	// Wait for rate limiter token
 	c.rateLimiter.Wait()
 
@@ -105,6 +108,9 @@ func (c *Client) doRequestWithRetry(ctx context.Context, req *http.Request) (*ht
 			// On throttle detected
 			c.rateLimiter.OnThrottle()
 		},
+		endpoint,
+		workspaceName,
+		itemName,
 	)
 }
 
@@ -203,7 +209,7 @@ func (c *Client) GetWorkspaces(ctx context.Context) ([]Workspace, error) {
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.doRequestWithRetry(ctx, req)
+		resp, err := c.doRequestWithRetry(ctx, req, "/workspaces", "N/A", "N/A")
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -229,7 +235,7 @@ func (c *Client) GetWorkspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 // GetWorkspaceItems retrieves all items in a workspace
-func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID string) ([]Item, error) {
+func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID, workspaceName string) ([]Item, error) {
 	url := fmt.Sprintf("%s/workspaces/%s/items", c.baseURL, workspaceID)
 
 	var allItems []Item
@@ -243,7 +249,7 @@ func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID string) ([]I
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.doRequestWithRetry(ctx, req)
+		resp, err := c.doRequestWithRetry(ctx, req, fmt.Sprintf("/workspaces/%s/items", workspaceID), workspaceName, "N/A")
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -274,7 +280,7 @@ func (c *Client) GetWorkspaceItems(ctx context.Context, workspaceID string) ([]I
 }
 
 // GetItemJobInstances retrieves job instances for a specific item
-func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID string) ([]JobInstance, error) {
+func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID, workspaceName, itemName string) ([]JobInstance, error) {
 	url := fmt.Sprintf("%s/workspaces/%s/items/%s/jobs/instances", c.baseURL, workspaceID, itemID)
 
 	var allInstances []JobInstance
@@ -288,7 +294,7 @@ func (c *Client) GetItemJobInstances(ctx context.Context, workspaceID, itemID st
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.doRequestWithRetry(ctx, req)
+		resp, err := c.doRequestWithRetry(ctx, req, fmt.Sprintf("/workspaces/%s/items/%s/jobs/instances", workspaceID, itemID), workspaceName, itemName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -358,7 +364,7 @@ func (c *Client) QueryActivityRuns(ctx context.Context, workspaceID, jobInstance
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.doRequestWithRetry(ctx, req)
+		resp, err := c.doRequestWithRetry(ctx, req, "/queryactivityruns", "N/A", jobInstanceID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute request: %w", err)
 		}
@@ -539,7 +545,7 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 			}
 
 			// Get items for this workspace
-			items, err := c.GetWorkspaceItems(ctx, workspace.ID)
+			items, err := c.GetWorkspaceItems(ctx, workspace.ID, workspace.DisplayName)
 			if err != nil {
 				result.Error = fmt.Errorf("failed to get items: %w", err)
 				workspaceResults <- result
@@ -580,7 +586,7 @@ func (c *Client) GetRecentJobs(ctx context.Context, workspaces []Workspace, limi
 						Jobs:          []map[string]interface{}{},
 					}
 
-					instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID)
+					instances, err := c.GetItemJobInstances(ctx, workspace.ID, item.ID, workspace.DisplayName, item.DisplayName)
 					if err != nil {
 						itemResult.Error = fmt.Errorf("failed to get job instances: %w", err)
 						itemResults <- itemResult
@@ -722,7 +728,7 @@ func (c *Client) GetLivySessions(ctx context.Context, workspaceID, notebookID st
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.doRequestWithRetry(ctx, req)
+	resp, err := c.doRequestWithRetry(ctx, req, fmt.Sprintf("/workspaces/%s/notebooks/%s/livySessions", workspaceID, notebookID), "N/A", notebookID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
