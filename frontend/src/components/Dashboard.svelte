@@ -39,6 +39,12 @@
     onMount(async () => {
         // Load cached data from DuckDB on mount
         await loadCachedData();
+
+        // Check if read-only replica is enabled
+        readOnlyReplicaEnabled = await window.go.main.App.IsReadOnlyReplicaEnabled();
+        if (readOnlyReplicaEnabled) {
+            readOnlyDatabasePath = await window.go.main.App.GetReadOnlyDatabasePath();
+        }
     });
 
     async function loadCachedData() {
@@ -342,6 +348,33 @@
             }
         }
     }
+
+    // Read-only replica state
+    let readOnlyReplicaEnabled = false;
+    let readOnlyDatabasePath = "";
+    let showCopyTooltip = false;
+
+    onMount(async () => {
+        // ... existing code ...
+
+        // Check if read-only replica is enabled
+        readOnlyReplicaEnabled = await window.go.main.App.IsReadOnlyReplicaEnabled();
+        if (readOnlyReplicaEnabled) {
+            readOnlyDatabasePath = await window.go.main.App.GetReadOnlyDatabasePath();
+        }
+    });
+
+    async function copyReadOnlyPath() {
+        try {
+            await navigator.clipboard.writeText(readOnlyDatabasePath);
+            showCopyTooltip = true;
+            setTimeout(() => {
+                showCopyTooltip = false;
+            }, 2000);
+        } catch (error) {
+            console.error("Failed to copy to clipboard:", error);
+        }
+    }
 </script>
 
 <svelte:window on:mousemove={handleMouseMove} on:mouseup={stopResize} />
@@ -418,6 +451,37 @@
                 </div>
             </div>
             <div class="flex items-center gap-3">
+                {#if readOnlyReplicaEnabled && readOnlyDatabasePath && currentView === "jobs"}
+                    <div class="relative">
+                        <button
+                            on:click={copyReadOnlyPath}
+                            class="px-3 py-2 text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md transition-colors flex items-center gap-2"
+                            title="Copy read-only database path"
+                        >
+                            <svg
+                                class="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                />
+                            </svg>
+                            DuckDB Read-Only
+                        </button>
+                        {#if showCopyTooltip}
+                            <div
+                                class="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 px-3 py-2 bg-slate-700 text-white text-xs rounded-md shadow-lg whitespace-nowrap z-50 border border-slate-600"
+                            >
+                                Copied: {readOnlyDatabasePath}
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
                 {#if hasLoadedData && currentView === "jobs"}
                     <div class="text-sm text-slate-400">
                         {#if lastSyncTime}

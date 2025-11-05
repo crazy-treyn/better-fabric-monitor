@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -16,12 +17,14 @@ import (
 
 // App struct
 type App struct {
-	ctx          context.Context
-	config       *config.Config
-	auth         *auth.AuthManager
-	db           *db.Database
-	fabricClient *fabric.Client
-	currentToken *auth.Token
+	ctx                 context.Context
+	config              *config.Config
+	auth                *auth.AuthManager
+	db                  *db.Database
+	fabricClient        *fabric.Client
+	currentToken        *auth.Token
+	parquetExportMutex  sync.Mutex
+	parquetExportActive bool
 }
 
 // NewApp creates a new App application struct
@@ -105,6 +108,9 @@ func (a *App) startup(ctx context.Context) {
 			logger.Log("No cached authentication found: %v\n", err)
 		}
 	}
+
+	// Start Parquet export on startup
+	a.StartParquetExport()
 }
 
 // shutdown is called when the app is closing
@@ -700,8 +706,14 @@ func (a *App) GetJobs() []map[string]interface{} {
 		logger.Log("Total jobs after merge: %d (fresh: %d, cached: %d, replaced: %d)\n",
 			len(mergedJobs), len(jobs), len(cachedJobs), len(freshJobMap))
 
+		// Trigger Parquet export after data sync
+		a.StartParquetExport()
+
 		return mergedJobs
 	}
+
+	// Trigger Parquet export after data sync
+	a.StartParquetExport()
 
 	return jobs
 }
@@ -824,6 +836,69 @@ func (a *App) GetLastSyncTime() string {
 	}
 
 	return lastSync.Format(time.RFC3339)
+}
+
+// StartParquetExport triggers an async export of tables to Parquet format
+func (a *App) StartParquetExport() {
+	// Skip if feature is disabled
+	if !a.config.Database.EnableReadOnlyReplica {
+		return
+	}
+
+	// Skip if database is not initialized
+	if a.db == nil {
+		return
+	}
+
+	// Check if an export is already running
+	a.parquetExportMutex.Lock()
+	if a.parquetExportActive {
+		a.parquetExportMutex.Unlock()
+		logger.Log("[PARQUET] Export already in progress, skipping\n")
+		return
+	}
+	a.parquetExportActive = true
+	a.parquetExportMutex.Unlock()
+
+	// Run export in goroutine to avoid blocking
+	go func() {
+		defer func() {
+			a.parquetExportMutex.Lock()
+			a.parquetExportActive = false
+			a.parquetExportMutex.Unlock()
+		}()
+
+		logger.Log("[PARQUET] Starting export to Parquet files...\n")
+		startTime := time.Now()
+
+		// Export all tables to Parquet
+		stats, err := a.db.ExportTablesToParquet(a.config.Database.ParquetPath)
+		if err != nil {
+			logger.Log("[PARQUET] ERROR: Export failed: %v\n", err)
+			return
+		}
+
+		// Log export statistics
+		totalRecords := 0
+		successCount := 0
+		for _, stat := range stats {
+			if stat.Success {
+				successCount++
+				totalRecords += stat.RecordCount
+			}
+		}
+
+		logger.Log("[PARQUET] Export completed: %d/%d tables successful, %d total records in %dms\n",
+			successCount, len(stats), totalRecords, time.Since(startTime).Milliseconds())
+
+		// Create or verify read-only database
+		if err := db.CreateReadOnlyDatabase(a.config.Database.ReadOnlyPath, a.config.Database.ParquetPath); err != nil {
+			logger.Log("[PARQUET] ERROR: Failed to create read-only database: %v\n", err)
+			return
+		}
+
+		logger.Log("[PARQUET] Read-only replica ready at: %s\n", a.config.Database.ReadOnlyPath)
+	}()
 }
 
 // GetAnalytics returns comprehensive analytics data for the dashboard
@@ -1666,4 +1741,28 @@ func (a *App) GetAppVersion() string {
 		return a.config.App.Version
 	}
 	return "0.2.3" // Fallback version
+}
+
+// IsReadOnlyReplicaEnabled returns whether the read-only replica feature is enabled
+func (a *App) IsReadOnlyReplicaEnabled() bool {
+	if a.config == nil {
+		return false
+	}
+	return a.config.Database.EnableReadOnlyReplica
+}
+
+// GetReadOnlyDatabasePath returns the absolute path to the read-only replica database wrapped in quotes
+func (a *App) GetReadOnlyDatabasePath() string {
+	if a.config == nil || !a.config.Database.EnableReadOnlyReplica {
+		return ""
+	}
+
+	// Get absolute path
+	absPath, err := filepath.Abs(a.config.Database.ReadOnlyPath)
+	if err != nil {
+		logger.Log("Warning: failed to get absolute path for read-only database: %v\n", err)
+		return fmt.Sprintf(`"%s"`, a.config.Database.ReadOnlyPath)
+	}
+
+	return fmt.Sprintf(`"%s"`, absPath)
 }

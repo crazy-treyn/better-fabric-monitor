@@ -262,3 +262,12 @@ type DailyItemStats struct {
 	MaxDurationMs int64   `json:"maxDurationMs"`
 	AvgDurationMs float64 `json:"avgDurationMs"`
 }
+
+// ParquetExportStats represents statistics for a Parquet export operation
+type ParquetExportStats struct {
+	TableName    string `json:"tableName"`
+	RecordCount  int    `json:"recordCount"`
+	DurationMs   int64  `json:"durationMs"`
+	Success      bool   `json:"success"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}

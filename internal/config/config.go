@@ -36,9 +36,12 @@ type FabricConfig struct {
 
 // DatabaseConfig holds database-related configuration
 type DatabaseConfig struct {
-	Path          string `json:"path" mapstructure:"path"`
-	EncryptionKey string `json:"encryptionKey" mapstructure:"encryption_key"`
-	RetentionDays int    `json:"retentionDays" mapstructure:"retention_days"`
+	Path                  string `json:"path" mapstructure:"path"`
+	EncryptionKey         string `json:"encryptionKey" mapstructure:"encryption_key"`
+	RetentionDays         int    `json:"retentionDays" mapstructure:"retention_days"`
+	EnableReadOnlyReplica bool   `json:"enableReadOnlyReplica" mapstructure:"enable_readonly_replica"`
+	ParquetPath           string `json:"parquetPath" mapstructure:"parquet_path"`
+	ReadOnlyPath          string `json:"readOnlyPath" mapstructure:"readonly_path"`
 }
 
 // UIConfig holds UI-related configuration
@@ -81,6 +84,9 @@ func Load() (*Config, error) {
 	viper.SetDefault("fabric.base_url", "https://api.fabric.microsoft.com/v1")
 	viper.SetDefault("database.path", "data/fabric-monitor.db")
 	viper.SetDefault("database.retention_days", 90)
+	viper.SetDefault("database.enable_readonly_replica", true)
+	viper.SetDefault("database.parquet_path", "data/parquet/")
+	viper.SetDefault("database.readonly_path", "data/fabric-monitor-replica.db")
 	viper.SetDefault("ui.theme", "dark")
 	viper.SetDefault("ui.primary_color", "#00BCF2")
 	viper.SetDefault("ui.default_view", "dashboard")
