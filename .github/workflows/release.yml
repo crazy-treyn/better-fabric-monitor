@@ -8,52 +8,107 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-windows:
-    name: Build Windows Release
-    runs-on: windows-latest
-    
+  resolve-artifact:
+    name: Locate PR Build
+    runs-on: ubuntu-latest
+    outputs:
+      build_run_id: ${{ steps.resolve.outputs.result }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Find successful pull request build
+        id: resolve
+        uses: actions/github-script@v7
         with:
-          go-version: '1.24'
-          cache: true
+          result-encoding: string
+          script: |
+            const { owner, repo } = context.repo;
+            const targetSha = context.sha;
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              { owner, repo, workflow_id: 'build.yml', per_page: 50 }
+            );
+            const match = runs.find(run => run.conclusion === 'success' && run.event === 'pull_request' && (
+              run.head_sha === targetSha ||
+              (run.pull_requests || []).some(pr => pr.merge_commit_sha === targetSha)
+            ));
+            if (match) {
+              core.info(`Reusing build workflow run ${match.id} for commit ${targetSha}.`);
+              return String(match.id);
+            } else {
+              core.info('No matching pull request build found for this tag. A fresh build will be created.');
+              return '';
+            }
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  reuse-build:
+    name: Reuse PR Artifact
+    needs: resolve-artifact
+    if: needs.resolve-artifact.outputs.build_run_id != ''
+    runs-on: windows-latest
+    outputs:
+      source: ${{ steps.marker.outputs.source }}
+    steps:
+      - name: Download pull request artifact
+        uses: actions/download-artifact@v4
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ needs.resolve-artifact.outputs.build_run_id }}
+          name: better-fabric-monitor-windows
+          path: release-assets
 
-      - name: Cache Wails CLI
-        id: cache-wails
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~\go\bin\wails.exe
-            ~\AppData\Local\Wails
-          key: ${{ runner.os }}-wails-${{ hashFiles('go.mod') }}
-          restore-keys: |
-            ${{ runner.os }}-wails-
-
-      - name: Install Wails CLI
-        if: steps.cache-wails.outputs.cache-hit != 'true'
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-        shell: pwsh
-
-      - name: Install frontend dependencies
+      - name: Stage executable
         run: |
-          cd frontend
-          npm install
+          $src = Get-ChildItem -Path release-assets -Recurse -Filter better-fabric-monitor.exe | Select-Object -First 1
+          if (-not $src) { throw 'Executable not found in downloaded artifact.' }
+          New-Item -ItemType Directory -Path build\bin -Force | Out-Null
+          Copy-Item -Path $src.FullName -Destination build\bin\better-fabric-monitor.exe -Force
         shell: pwsh
 
-      - name: Build application
-        run: wails build
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary
+          path: build/bin/better-fabric-monitor.exe
+          retention-days: 7
+
+      - name: Mark artifact source
+        id: marker
+        run: echo "source=reused" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+  fallback-build:
+    name: Build From Source
+    needs: resolve-artifact
+    if: needs.resolve-artifact.outputs.build_run_id == ''
+    uses: ./.github/workflows/windows-build.yml
+    with:
+      artifact-name: release-binary
+    secrets: inherit
+
+  publish:
+    name: Publish Release
+    needs:
+      - resolve-artifact
+      - reuse-build
+      - fallback-build
+    runs-on: windows-latest
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binary
+          path: build/bin
+
+      - name: Note artifact source
+        run: |
+          if ('${{ needs.reuse-build.result }}' -eq 'success') {
+            Write-Host 'Using executable from pull request build.'
+          } else {
+            Write-Host 'Using executable from release build.'
+          }
         shell: pwsh
 
       - name: Generate SHA-256 checksum
@@ -65,14 +120,15 @@ jobs:
       - name: Verify build artifacts
         run: |
           if (!(Test-Path build/bin/better-fabric-monitor.exe)) {
-            Write-Error "Build failed: executable not found"
+            Write-Error 'Build failed: executable not found'
             exit 1
           }
           if (!(Test-Path build/bin/better-fabric-monitor.exe.sha256)) {
-            Write-Error "Build failed: checksum file not found"
+            Write-Error 'Build failed: checksum file not found'
             exit 1
           }
-          Write-Host "✓ Executable size: $((Get-Item build/bin/better-fabric-monitor.exe).Length / 1MB) MB"
+          $size = (Get-Item build/bin/better-fabric-monitor.exe).Length / 1MB
+          Write-Host "✓ Executable size: $([math]::Round($size, 2)) MB"
           Write-Host "✓ SHA-256: $(Get-Content build/bin/better-fabric-monitor.exe.sha256)"
         shell: pwsh
 

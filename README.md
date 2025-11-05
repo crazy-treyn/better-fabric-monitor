@@ -187,6 +187,12 @@ better-fabric-monitor/
 └── data/                       # Local database and logs
 ```
 
+## Release Process
+
+- Follow GitHub Flow: branch from `main`, open a pull request, and merge via squash once the Build workflow passes.
+- The `Build` workflow runs on pull requests (or manual dispatch) and produces the Windows executable artifact used for releases.
+- Maintainer guide for cutting a release lives in `docs/RELEASING.md`.
+
 ## Resources
 
 - [Microsoft Fabric Documentation](https://learn.microsoft.com/en-us/fabric/)

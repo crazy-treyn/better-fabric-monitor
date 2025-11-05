@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: agent
 ---
 # Release Workflow (Automated with GitHub MCP)
 
@@ -16,6 +16,8 @@ Automated end-to-end release workflow for Better Fabric Monitor using GitHub MCP
 ## Instructions for LLM Agent
 
 This workflow automates the entire release process from version bump to GitHub Release creation. **Ask for user approval at each major step before proceeding.**
+
+The CI pipeline now runs Windows builds on pull requests (and manual dispatches) only. The release workflow reuses the validated PR artifact whenever possible and falls back to a single rebuild if needed.
 
 ### **Step 0: Gather Information**
 
@@ -252,7 +254,7 @@ git push origin v[VERSION]
 ```
 🚀 Release workflow triggered!
 
-⏱️ Build in progress (~2-3 minutes)
+📦 Packaging release (reuses the PR build when available; fallback build takes ~2-3 minutes)
 📊 Monitor at: https://github.com/crazy-treyn/better-fabric-monitor/actions
 
 ⏸️ PAUSED: Please check the workflow status and confirm when complete.
@@ -289,6 +291,8 @@ mcp_github_github_get_release_by_tag({
 📦 Draft Release Page:
 https://github.com/crazy-treyn/better-fabric-monitor/releases/tag/v[VERSION]
 
+ℹ️ Check the workflow logs to confirm whether the executable was reused from the PR build or rebuilt for the release.
+
 📝 Next: Write Your Release Notes
 
 The release is currently a DRAFT with binaries already attached. Now it's time to write your release notes!
@@ -319,7 +323,7 @@ The release is currently a DRAFT with binaries already attached. Now it's time t
 
 4. **Add screenshots/images:**
    - Drag images from your computer directly into the editor
-   - They'll auto-upload and insert as: `![image](url)`
+   - They'll auto-upload and insert as: `![image](https://example.com/your-screenshot.png)`
    - You can add captions below each image
 
 5. **Preview your release:**
@@ -440,6 +444,7 @@ git push origin --delete release/v[VERSION]
 - ✅ Git commits and pushes
 - ✅ PR creation via GitHub MCP
 - ✅ Tag creation and push
+- ✅ Release packaging that reuses the PR build when available
 - ✅ Release verification
 - ✅ Branch cleanup
 
@@ -454,7 +459,7 @@ git push origin --delete release/v[VERSION]
 
 ### **Manual Steps:**
 - PR review and merge (intentionally manual for quality control)
-- Confirm workflow completion (watch build progress)
+- Confirm release packaging finished (watch workflow logs)
 
 ---
 
