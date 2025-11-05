@@ -29,41 +29,37 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const targetSha = context.sha;
+            const prs = await github.paginate(
+              github.rest.repos.listPullRequestsAssociatedWithCommit,
+              {
+                owner,
+                repo,
+                commit_sha: targetSha,
+                per_page: 50,
+                mediaType: { previews: ['groot'] }
+              }
+            );
+            const candidateShas = new Set([targetSha]);
+            for (const pr of prs) {
+              if (pr?.head?.sha) {
+                candidateShas.add(pr.head.sha);
+              }
+              if (pr?.merge_commit_sha) {
+                candidateShas.add(pr.merge_commit_sha);
+              }
+            }
             const runs = await github.paginate(
               github.rest.actions.listWorkflowRuns,
               { owner, repo, workflow_id: 'build.yml', per_page: 50 }
             );
-            const prCache = new Map();
-            let matchedRun = null;
-            for (const run of runs) {
-              if (run.conclusion !== 'success' || run.event !== 'pull_request') {
-                continue;
-              }
-              if (run.head_sha === targetSha) {
-                matchedRun = run;
-                break;
-              }
-              for (const pr of run.pull_requests || []) {
-                if (!pr || !pr.number) {
-                  continue;
-                }
-                if (!prCache.has(pr.number)) {
-                  const { data } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
-                  prCache.set(pr.number, data);
-                }
-                const prData = prCache.get(pr.number);
-                if (prData && (prData.merge_commit_sha === targetSha || prData.head.sha === targetSha)) {
-                  matchedRun = run;
-                  break;
-                }
-              }
-              if (matchedRun) {
-                break;
-              }
-            }
-            if (matchedRun) {
-              core.info(`Reusing build workflow run ${matchedRun.id} for commit ${targetSha}.`);
-              return String(matchedRun.id);
+            const match = runs.find(run =>
+              run.conclusion === 'success' &&
+              run.event === 'pull_request' &&
+              candidateShas.has(run.head_sha)
+            );
+            if (match) {
+              core.info(`Reusing build workflow run ${match.id} for commit ${targetSha}.`);
+              return String(match.id);
             } else {
               core.info('No matching pull request build found for this tag. A fresh build will be created.');
               return '';
