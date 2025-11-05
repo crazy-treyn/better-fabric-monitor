@@ -101,7 +101,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("app.debug", false)
 	viper.SetDefault("app.log_level", "info")
 	viper.SetDefault("app.name", "Better Fabric Monitor")
-	viper.SetDefault("app.version", "0.2.3")
+	viper.SetDefault("app.version", "0.2.4")
 
 	// Environment variable bindings
 	viper.SetEnvPrefix("FABRIC_MONITOR")
