@@ -116,6 +116,7 @@ jobs:
       - resolve-artifact
       - reuse-build
       - fallback-build
+    if: ${{ always() && (needs.reuse-build.result == 'success' || needs.fallback-build.result == 'success') }}
     runs-on: windows-latest
     steps:
       - name: Download release artifact
