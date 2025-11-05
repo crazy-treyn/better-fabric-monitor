@@ -33,13 +33,37 @@ jobs:
               github.rest.actions.listWorkflowRuns,
               { owner, repo, workflow_id: 'build.yml', per_page: 50 }
             );
-            const match = runs.find(run => run.conclusion === 'success' && run.event === 'pull_request' && (
-              run.head_sha === targetSha ||
-              (run.pull_requests || []).some(pr => pr.merge_commit_sha === targetSha)
-            ));
-            if (match) {
-              core.info(`Reusing build workflow run ${match.id} for commit ${targetSha}.`);
-              return String(match.id);
+            const prCache = new Map();
+            let matchedRun = null;
+            for (const run of runs) {
+              if (run.conclusion !== 'success' || run.event !== 'pull_request') {
+                continue;
+              }
+              if (run.head_sha === targetSha) {
+                matchedRun = run;
+                break;
+              }
+              for (const pr of run.pull_requests || []) {
+                if (!pr || !pr.number) {
+                  continue;
+                }
+                if (!prCache.has(pr.number)) {
+                  const { data } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+                  prCache.set(pr.number, data);
+                }
+                const prData = prCache.get(pr.number);
+                if (prData && (prData.merge_commit_sha === targetSha || prData.head.sha === targetSha)) {
+                  matchedRun = run;
+                  break;
+                }
+              }
+              if (matchedRun) {
+                break;
+              }
+            }
+            if (matchedRun) {
+              core.info(`Reusing build workflow run ${matchedRun.id} for commit ${targetSha}.`);
+              return String(matchedRun.id);
             } else {
               core.info('No matching pull request build found for this tag. A fresh build will be created.');
               return '';
