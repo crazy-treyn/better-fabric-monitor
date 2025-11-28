@@ -5,12 +5,14 @@
 Better Fabric Monitor is a desktop application that gives you the historical insights and analytics that Microsoft Fabric's built-in monitoring simply doesn't provide. Built for data professionals who need to understand job execution trends, identify patterns, and troubleshoot issues across their Fabric workspaces.
 
 ## Screenshots
+### Analytics Dashboard
+![Analytics Dashboard](docs/images/AnalyticsDashboard.png)
 
-<!-- TODO: Add screenshot of main dashboard view -->
-![Dashboard View]()
+![Analytics Dashboard Details](docs/images/AnalyticsDashboardDetails.png)
 
-<!-- TODO: Add screenshot of analytics dashboard -->
-![Analytics Dashboard]()
+![Recent Failures](docs/images/RecentFailuresLongRunningJobs.png)
+## Recent Jobs Dashboard
+![Recent Jobs](docs/images/JobsDashboard.png)
 
 ## Why Better Fabric Monitor?
 
