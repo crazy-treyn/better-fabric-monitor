@@ -11,7 +11,8 @@ Better Fabric Monitor is a desktop application that gives you the historical ins
 ![Analytics Dashboard Details](docs/images/AnalyticsDashboardDetails.png)
 
 ![Recent Failures](docs/images/RecentFailuresLongRunningJobs.png)
-## Recent Jobs Dashboard
+
+### Recent Jobs Dashboard
 ![Recent Jobs](docs/images/JobsDashboard.png)
 
 ## Why Better Fabric Monitor?
